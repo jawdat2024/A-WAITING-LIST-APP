@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Clock, Users, MessageCircle, Check, Trash2, Plus, X, History as HistoryIcon, List } from 'lucide-react';
+import { Clock, Users, MessageCircle, Check, Trash2, Plus, Minus, X, History as HistoryIcon, List } from 'lucide-react';
 
 interface Customer {
   id: string;
@@ -128,7 +128,7 @@ export default function App() {
   const confirmNotify = () => {
     if (!customerToNotify || !selectedTable) return;
 
-    const message = `Hello ${customerToNotify.name}, your table (${selectedTable}) for ${customerToNotify.partySize} is ready at CARTEL COFFEE ROASTERS. Please head to the host stand.`;
+    const message = `Welcome back, ${customerToNotify.name}. Your table for ${customerToNotify.partySize} (${selectedTable}) is prepared and waiting for you at Cartel.\n\nKindly approach the host stand to be seated. See you shortly.`;
     const encodedMessage = encodeURIComponent(message);
     const whatsappUrl = `https://wa.me/${customerToNotify.phone.replace('+', '')}?text=${encodedMessage}`;
     
@@ -222,18 +222,30 @@ export default function App() {
 
               <div>
                 <label className="block text-sm text-brand-muted mb-1.5">Party Size</label>
-                <div className="flex items-center gap-4 bg-brand-bg border border-brand-border rounded-xl px-4 py-2">
-                  <input 
-                    type="range" 
-                    min="1" 
-                    max="12" 
-                    value={partySize} 
-                    onChange={(e) => setPartySize(parseInt(e.target.value))} 
-                    className="flex-1 accent-brand-accent h-2 bg-brand-border rounded-lg appearance-none cursor-pointer" 
-                  />
-                  <div className="font-cinzel text-xl w-12 text-center text-brand-text font-semibold bg-brand-card py-1 rounded-lg border border-brand-border">
+                <div className="flex items-center justify-between bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-1.5 shadow-inner">
+                  <button
+                    type="button"
+                    onClick={() => setPartySize(Math.max(1, partySize - 1))}
+                    disabled={partySize <= 1}
+                    className="w-12 h-12 flex items-center justify-center rounded-lg bg-black/40 border border-white/5 text-brand-text hover:bg-white/10 active:scale-95 transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                    aria-label="Decrease party size"
+                  >
+                    <Minus size={20} className="opacity-80" />
+                  </button>
+                  
+                  <div className="font-cinzel text-2xl w-16 text-center text-brand-text font-semibold tracking-wider">
                     {partySize}
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setPartySize(Math.min(12, partySize + 1))}
+                    disabled={partySize >= 12}
+                    className="w-12 h-12 flex items-center justify-center rounded-lg bg-black/40 border border-white/5 text-brand-text hover:bg-white/10 active:scale-95 transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                    aria-label="Increase party size"
+                  >
+                    <Plus size={20} className="opacity-80" />
+                  </button>
                 </div>
               </div>
 
