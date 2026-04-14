@@ -128,7 +128,7 @@ export default function App() {
   const confirmNotify = () => {
     if (!customerToNotify || !selectedTable) return;
 
-    const message = `Welcome back, ${customerToNotify.name}. Your table for ${customerToNotify.partySize} (${selectedTable}) is prepared and waiting for you at Cartel.\n\nKindly approach the host stand to be seated. See you shortly.`;
+    const message = `Welcome back, *${customerToNotify.name}* !\n\nYour table for *${customerToNotify.partySize}* at *${selectedTable}* is all set and waiting for you at *Cartel*.\n\nPlease head to the host stand when you arrive — we’ll take care of the rest. See you soon `;
     const encodedMessage = encodeURIComponent(message);
     const whatsappUrl = `https://wa.me/${customerToNotify.phone.replace('+', '')}?text=${encodedMessage}`;
     
