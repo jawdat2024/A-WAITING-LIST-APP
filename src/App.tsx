@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Clock, Users, MessageCircle, Check, Trash2, Plus } from 'lucide-react';
+import { Clock, Users, MessageCircle, Check, Trash2, Plus, X, History as HistoryIcon, List } from 'lucide-react';
 
 interface Customer {
   id: string;
@@ -14,7 +14,19 @@ interface Customer {
   partySize: number;
   addedAt: number;
   status: 'WAITING' | 'NOTIFIED' | 'SEATED';
+  assignedTable?: string;
+  seatedAt?: number;
 }
+
+const TABLE_MAP = {
+  'BAR': 7,
+  'LOUNGE': 6,
+  'COUCH': 7,
+  'ROUND TABLES': 5,
+  'BENCH': 7,
+  'ROOFTOP': 10,
+  'OUTDOOR': 10
+};
 
 export default function App() {
   const [customers, setCustomers] = useState<Customer[]>(() => {
@@ -34,6 +46,10 @@ export default function App() {
   const [partySize, setPartySize] = useState(2);
   const [now, setNow] = useState(Date.now());
   const [error, setError] = useState('');
+  
+  const [activeTab, setActiveTab] = useState<'waiting' | 'history'>('waiting');
+  const [customerToNotify, setCustomerToNotify] = useState<Customer | null>(null);
+  const [selectedTable, setSelectedTable] = useState('');
 
   // Update timer every minute
   useEffect(() => {
@@ -101,25 +117,36 @@ export default function App() {
     setName('');
     setPhone('');
     setPartySize(2);
+    setActiveTab('waiting'); // Switch to waiting list to see the new addition
   };
 
-  const notifyCustomer = (customer: Customer) => {
-    const message = `Hello ${customer.name}, your table for ${customer.partySize} is ready at CARTEL COFFEE ROASTERS. Please head to the host stand.`;
+  const handleNotifyClick = (customer: Customer) => {
+    setCustomerToNotify(customer);
+    setSelectedTable(customer.assignedTable || '');
+  };
+
+  const confirmNotify = () => {
+    if (!customerToNotify || !selectedTable) return;
+
+    const message = `Hello ${customerToNotify.name}, your table (${selectedTable}) for ${customerToNotify.partySize} is ready at CARTEL COFFEE ROASTERS. Please head to the host stand.`;
     const encodedMessage = encodeURIComponent(message);
-    const whatsappUrl = `https://wa.me/${customer.phone.replace('+', '')}?text=${encodedMessage}`;
+    const whatsappUrl = `https://wa.me/${customerToNotify.phone.replace('+', '')}?text=${encodedMessage}`;
     
     // Open WhatsApp
     window.open(whatsappUrl, '_blank');
 
-    // Update status
+    // Update status and assigned table
     setCustomers((prev) =>
-      prev.map((c) => (c.id === customer.id ? { ...c, status: 'NOTIFIED' } : c))
+      prev.map((c) => (c.id === customerToNotify.id ? { ...c, status: 'NOTIFIED', assignedTable: selectedTable } : c))
     );
+    
+    setCustomerToNotify(null);
+    setSelectedTable('');
   };
 
   const markSeated = (id: string) => {
     setCustomers((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, status: 'SEATED' } : c))
+      prev.map((c) => (c.id === id ? { ...c, status: 'SEATED', seatedAt: Date.now() } : c))
     );
   };
 
@@ -133,7 +160,7 @@ export default function App() {
   const seatedCustomers = customers.filter((c) => c.status === 'SEATED');
 
   return (
-    <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto">
+    <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto pb-24">
       {/* Header */}
       <header className="flex flex-col items-center justify-center mb-12 mt-4">
         <img 
@@ -145,8 +172,8 @@ export default function App() {
         <h1 className="font-cinzel text-4xl md:text-5xl font-bold tracking-widest text-brand-text text-center">
           CARTEL
         </h1>
-        <p className="font-inter tracking-[0.3em] text-brand-muted text-sm mt-2">
-          COFFEE ROASTERS
+        <p className="font-inter tracking-[0.3em] text-brand-muted text-sm mt-2 uppercase">
+          A NEW FREQUENCY.
         </p>
       </header>
 
@@ -220,102 +247,239 @@ export default function App() {
           </form>
         </div>
 
-        {/* Right Column: Waiting List */}
-        <div className="lg:col-span-8 space-y-4">
-          <div className="flex items-center justify-between mb-2 px-2">
-            <h2 className="font-cinzel text-xl font-semibold text-brand-text">
+        {/* Right Column: Waiting List & History */}
+        <div className="lg:col-span-8 space-y-6">
+          {/* Tabs */}
+          <div className="flex gap-2 p-1 bg-brand-card border border-brand-border rounded-xl">
+            <button
+              onClick={() => setActiveTab('waiting')}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-medium text-sm transition-colors ${
+                activeTab === 'waiting' 
+                  ? 'bg-brand-bg text-brand-text shadow-sm border border-brand-border' 
+                  : 'text-brand-muted hover:text-brand-text'
+              }`}
+            >
+              <List size={18} />
               Waiting List
-            </h2>
-            <span className="bg-brand-card border border-brand-border text-brand-text px-3 py-1 rounded-full text-sm font-medium">
-              {activeCustomers.length} Waiting
-            </span>
+              <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${activeTab === 'waiting' ? 'bg-brand-accent/20 text-brand-accent' : 'bg-brand-border text-brand-muted'}`}>
+                {activeCustomers.length}
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-medium text-sm transition-colors ${
+                activeTab === 'history' 
+                  ? 'bg-brand-bg text-brand-text shadow-sm border border-brand-border' 
+                  : 'text-brand-muted hover:text-brand-text'
+              }`}
+            >
+              <HistoryIcon size={18} />
+              History
+              <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${activeTab === 'history' ? 'bg-brand-accent/20 text-brand-accent' : 'bg-brand-border text-brand-muted'}`}>
+                {seatedCustomers.length}
+              </span>
+            </button>
           </div>
 
-          {activeCustomers.length === 0 ? (
-            <div className="bg-brand-card border border-brand-border border-dashed rounded-2xl p-12 text-center">
-              <Users size={48} className="mx-auto text-brand-muted/30 mb-4" />
-              <p className="text-brand-muted font-medium">The waiting list is currently empty.</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {activeCustomers.map((customer, index) => (
-                <div 
-                  key={customer.id} 
-                  className="bg-brand-card border border-brand-border p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-brand-border/80 transition-colors"
-                >
-                  <div className="flex items-start gap-4 sm:gap-6">
-                    <div className="font-cinzel text-3xl text-brand-muted/40 font-bold w-10 pt-1">
-                      #{index + 1}
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-lg text-brand-text">{customer.name}</h3>
-                      <div className="text-brand-muted text-sm flex flex-wrap items-center gap-x-4 gap-y-2 mt-1.5">
-                        <span className="font-mono text-xs bg-brand-bg px-2 py-0.5 rounded border border-brand-border">
-                          {maskPhone(customer.originalPhone)}
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <Users size={14} className="text-brand-accent" /> 
-                          {customer.partySize} {customer.partySize === 1 ? 'person' : 'persons'}
-                        </span>
-                        <span className="flex items-center gap-1.5 text-brand-accent">
-                          <Clock size={14} /> 
-                          {getWaitTime(customer.addedAt)}
-                        </span>
+          {/* Tab Content: Waiting List */}
+          {activeTab === 'waiting' && (
+            <div>
+              {activeCustomers.length === 0 ? (
+                <div className="bg-brand-card border border-brand-border border-dashed rounded-2xl p-12 text-center">
+                  <Users size={48} className="mx-auto text-brand-muted/30 mb-4" />
+                  <p className="text-brand-muted font-medium">The waiting list is currently empty.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {activeCustomers.map((customer, index) => (
+                    <div 
+                      key={customer.id} 
+                      className="bg-brand-card border border-brand-border p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-brand-border/80 transition-colors"
+                    >
+                      <div className="flex items-start gap-4 sm:gap-6">
+                        <div className="font-cinzel text-3xl text-brand-muted/40 font-bold w-10 pt-1">
+                          #{index + 1}
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-lg text-brand-text flex items-center gap-2">
+                            {customer.name}
+                            {customer.assignedTable && (
+                              <span className="text-xs font-normal bg-brand-accent/10 text-brand-accent border border-brand-accent/20 px-2 py-0.5 rounded">
+                                {customer.assignedTable}
+                              </span>
+                            )}
+                          </h3>
+                          <div className="text-brand-muted text-sm flex flex-wrap items-center gap-x-4 gap-y-2 mt-1.5">
+                            <span className="font-mono text-xs bg-brand-bg px-2 py-0.5 rounded border border-brand-border">
+                              {maskPhone(customer.originalPhone)}
+                            </span>
+                            <span className="flex items-center gap-1.5">
+                              <Users size={14} className="text-brand-accent" /> 
+                              {customer.partySize} {customer.partySize === 1 ? 'person' : 'persons'}
+                            </span>
+                            <span className="flex items-center gap-1.5 text-brand-accent">
+                              <Clock size={14} /> 
+                              {getWaitTime(customer.addedAt)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 sm:gap-3 self-end sm:self-auto">
+                        {customer.status === 'WAITING' ? (
+                          <button 
+                            onClick={() => handleNotifyClick(customer)} 
+                            className="bg-[#25D366]/10 text-[#25D366] border border-[#25D366]/20 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium hover:bg-[#25D366]/20 transition-colors"
+                          >
+                            <MessageCircle size={16} /> NOTIFY
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={() => handleNotifyClick(customer)} 
+                            className="bg-brand-accent/10 text-brand-accent border border-brand-accent/20 px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-brand-accent/20 transition-colors"
+                            title="Notify Again"
+                          >
+                            <Check size={16} /> NOTIFIED
+                          </button>
+                        )}
+                        
+                        <button 
+                          onClick={() => markSeated(customer.id)} 
+                          className="bg-brand-bg border border-brand-border text-brand-text px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium hover:border-brand-text transition-colors"
+                          title="Mark as Seated"
+                        >
+                          SEAT
+                        </button>
+                        
+                        <button 
+                          onClick={() => deleteCustomer(customer.id)} 
+                          className="text-brand-muted hover:text-red-400 p-2.5 rounded-xl hover:bg-red-500/10 transition-colors ml-1"
+                          title="Remove from list"
+                        >
+                          <Trash2 size={18} />
+                        </button>
                       </div>
                     </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-2 sm:gap-3 self-end sm:self-auto">
-                    {customer.status === 'WAITING' ? (
-                      <button 
-                        onClick={() => notifyCustomer(customer)} 
-                        className="bg-[#25D366]/10 text-[#25D366] border border-[#25D366]/20 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium hover:bg-[#25D366]/20 transition-colors"
-                      >
-                        <MessageCircle size={16} /> NOTIFY
-                      </button>
-                    ) : (
-                      <span className="bg-brand-accent/10 text-brand-accent border border-brand-accent/20 px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2">
-                        <Check size={16} /> NOTIFIED
-                      </span>
-                    )}
-                    
-                    <button 
-                      onClick={() => markSeated(customer.id)} 
-                      className="bg-brand-bg border border-brand-border text-brand-text px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium hover:border-brand-text transition-colors"
-                      title="Mark as Seated"
-                    >
-                      SEAT
-                    </button>
-                    
-                    <button 
-                      onClick={() => deleteCustomer(customer.id)} 
-                      className="text-brand-muted hover:text-red-400 p-2.5 rounded-xl hover:bg-red-500/10 transition-colors ml-1"
-                      title="Remove from list"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           )}
 
-          {/* Recently Seated (Optional, just to show they aren't fully gone immediately if we wanted, but we'll just keep them hidden or in a small section) */}
-          {seatedCustomers.length > 0 && (
-            <div className="mt-12 pt-8 border-t border-brand-border">
-              <h3 className="font-cinzel text-sm font-semibold text-brand-muted mb-4">Recently Seated</h3>
-              <div className="flex flex-wrap gap-2">
-                {seatedCustomers.slice(-5).map(c => (
-                  <div key={c.id} className="bg-brand-bg border border-brand-border px-3 py-1.5 rounded-lg text-xs text-brand-muted flex items-center gap-2">
-                    <span>{c.name}</span>
-                    <span className="opacity-50">({c.partySize})</span>
-                  </div>
-                ))}
-              </div>
+          {/* Tab Content: History */}
+          {activeTab === 'history' && (
+            <div>
+              {seatedCustomers.length === 0 ? (
+                <div className="bg-brand-card border border-brand-border border-dashed rounded-2xl p-12 text-center">
+                  <HistoryIcon size={48} className="mx-auto text-brand-muted/30 mb-4" />
+                  <p className="text-brand-muted font-medium">No seating history yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {seatedCustomers
+                    .sort((a, b) => (b.seatedAt || 0) - (a.seatedAt || 0))
+                    .map(customer => (
+                    <div 
+                      key={customer.id} 
+                      className="bg-brand-card border border-brand-border p-4 sm:p-5 rounded-2xl flex justify-between items-center opacity-80 hover:opacity-100 transition-opacity"
+                    >
+                      <div>
+                        <h3 className="font-semibold text-brand-text">{customer.name}</h3>
+                        <div className="text-brand-muted text-sm flex items-center gap-3 mt-1.5">
+                          <span className="flex items-center gap-1.5">
+                            <Users size={14} className="text-brand-accent" /> 
+                            {customer.partySize}
+                          </span>
+                          {customer.assignedTable && (
+                            <span className="text-brand-accent bg-brand-accent/10 px-2 py-0.5 rounded text-xs">
+                              {customer.assignedTable}
+                            </span>
+                          )}
+                          <span className="font-mono text-xs bg-brand-bg px-2 py-0.5 rounded border border-brand-border">
+                            {maskPhone(customer.originalPhone)}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="bg-brand-bg border border-brand-border px-3 py-1 rounded-lg text-xs text-brand-muted font-medium">
+                          SEATED
+                        </span>
+                        {customer.seatedAt && (
+                          <div className="text-xs text-brand-muted mt-2 font-mono">
+                            {new Date(customer.seatedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
+
+      {/* Notify Modal */}
+      {customerToNotify && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-brand-card border border-brand-border rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="font-cinzel text-xl font-semibold text-brand-text">Assign Table</h3>
+              <button 
+                onClick={() => {
+                  setCustomerToNotify(null);
+                  setSelectedTable('');
+                }} 
+                className="text-brand-muted hover:text-brand-text transition-colors p-1"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="bg-brand-bg border border-brand-border rounded-xl p-4 mb-6">
+              <p className="text-sm text-brand-muted mb-1">Notifying Guest:</p>
+              <p className="text-lg font-semibold text-brand-text">{customerToNotify.name}</p>
+              <p className="text-sm text-brand-accent mt-1 flex items-center gap-1.5">
+                <Users size={14} /> Party of {customerToNotify.partySize}
+              </p>
+            </div>
+
+            <div className="mb-8">
+              <label className="block text-sm text-brand-muted mb-2">Select Table</label>
+              <div className="relative">
+                <select
+                  value={selectedTable}
+                  onChange={(e) => setSelectedTable(e.target.value)}
+                  className="w-full bg-brand-bg border border-brand-border rounded-xl px-4 py-3.5 text-brand-text focus:outline-none focus:border-brand-accent transition-colors appearance-none cursor-pointer"
+                >
+                  <option value="" disabled>Choose a table...</option>
+                  {Object.entries(TABLE_MAP).map(([category, count]) => (
+                    <optgroup key={category} label={category} className="bg-brand-card text-brand-muted font-cinzel">
+                      {Array.from({ length: count }).map((_, i) => (
+                        <option key={`${category}-${i + 1}`} value={`${category} ${i + 1}`} className="text-brand-text font-inter">
+                          {category} {i + 1}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-brand-muted">
+                  ▼
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={confirmNotify}
+              disabled={!selectedTable}
+              className="w-full bg-[#25D366] text-black font-semibold py-3.5 rounded-xl hover:bg-[#20b858] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              <MessageCircle size={20} />
+              SEND WHATSAPP
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
