@@ -50,6 +50,11 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'waiting' | 'history'>('waiting');
   const [customerToNotify, setCustomerToNotify] = useState<Customer | null>(null);
   const [selectedTable, setSelectedTable] = useState('');
+  
+  // Anti-Spam Human Mimicry States
+  const [dispatchStatus, setDispatchStatus] = useState<'idle' | 'counting' | 'ready'>('idle');
+  const [countdown, setCountdown] = useState(0);
+  const [globalCooldown, setGlobalCooldown] = useState(0);
 
   // Update timer every minute
   useEffect(() => {
@@ -61,6 +66,26 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('cartel_waiting_list', JSON.stringify(customers));
   }, [customers]);
+
+  // Anti-Spam Global Cooldown Timer
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (globalCooldown > 0) {
+      timer = setTimeout(() => setGlobalCooldown(c => c - 1), 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [globalCooldown]);
+
+  // Modal Dispatch Countdown
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (dispatchStatus === 'counting' && countdown > 0) {
+      timer = setTimeout(() => setCountdown(c => c - 1), 1000);
+    } else if (dispatchStatus === 'counting' && countdown === 0) {
+      setDispatchStatus('ready');
+    }
+    return () => clearTimeout(timer);
+  }, [dispatchStatus, countdown]);
 
   const validatePhone = (p: string) => {
     const cleaned = p.replace(/\D/g, '');
@@ -120,15 +145,41 @@ export default function App() {
     setActiveTab('waiting'); // Switch to waiting list to see the new addition
   };
 
+  const closeModal = () => {
+    setCustomerToNotify(null);
+    setSelectedTable('');
+    setDispatchStatus('idle');
+  };
+
   const handleNotifyClick = (customer: Customer) => {
     setCustomerToNotify(customer);
     setSelectedTable(customer.assignedTable || '');
+    setDispatchStatus('idle');
+  };
+
+  const startAntiSpamTimer = () => {
+    setDispatchStatus('counting');
+    setCountdown(Math.floor(Math.random() * (49 - 30 + 1)) + 30);
+  };
+
+  const triggerErrorCooldown = () => {
+    setGlobalCooldown(60);
+    closeModal();
+    console.warn("Error logged: Fallback cooldown initiated for 60 seconds.");
   };
 
   const confirmNotify = () => {
     if (!customerToNotify || !selectedTable) return;
 
-    const message = `Welcome back, *${customerToNotify.name}* !\n\nYour table for *${customerToNotify.partySize}* at *${selectedTable}* is all set and waiting for you at *Cartel*.\n\nPlease head to the host stand when you arrive — we’ll take care of the rest. See you soon `;
+    const templates = [
+      (name: string, count: number, table: string) => `Welcome back, *${name}*. Your table for *${count}* at *${table}* is all set and waiting for you at Cartel. Please head to the host stand when you arrive—we’ll take care of the rest. See you soon.\n\n*Cartel Coffee Roasters | The Art of Specialty.*`,
+      (name: string, count: number, table: string) => `Hi *${name}*, we’re ready to host you. We've reserved *${table}* for your party of *${count}*. Please check in with our hostess to be seated. We look forward to seeing you.\n\n*Cartel Coffee Roasters | The Art of Specialty.*`,
+      (name: string, count: number, table: string) => `Hello *${name}*, your wait is over. *${table}* is ready for your group of *${count}*. Please make your way to the entrance so we can get you settled.\n\n*Cartel Coffee Roasters | The Art of Specialty.*`
+    ];
+
+    const randomTemplate = templates[Math.floor(Math.random() * templates.length)];
+    const message = randomTemplate(customerToNotify.name, customerToNotify.partySize, selectedTable);
+
     const encodedMessage = encodeURIComponent(message);
     const whatsappUrl = `https://wa.me/${customerToNotify.phone.replace('+', '')}?text=${encodedMessage}`;
     
@@ -140,8 +191,7 @@ export default function App() {
       prev.map((c) => (c.id === customerToNotify.id ? { ...c, status: 'NOTIFIED', assignedTable: selectedTable } : c))
     );
     
-    setCustomerToNotify(null);
-    setSelectedTable('');
+    closeModal();
   };
 
   const markSeated = (id: string) => {
@@ -341,17 +391,21 @@ export default function App() {
                         {customer.status === 'WAITING' ? (
                           <button 
                             onClick={() => handleNotifyClick(customer)} 
-                            className="bg-[#25D366]/10 text-[#25D366] border border-[#25D366]/20 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium hover:bg-[#25D366]/20 transition-colors"
+                            disabled={globalCooldown > 0}
+                            className={`bg-[#25D366]/10 text-[#25D366] border border-[#25D366]/20 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium transition-colors ${globalCooldown > 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#25D366]/20'}`}
                           >
-                            <MessageCircle size={16} /> NOTIFY
+                            <MessageCircle size={16} /> 
+                            {globalCooldown > 0 ? `WAIT (${globalCooldown}s)` : 'NOTIFY'}
                           </button>
                         ) : (
                           <button 
                             onClick={() => handleNotifyClick(customer)} 
-                            className="bg-brand-accent/10 text-brand-accent border border-brand-accent/20 px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-brand-accent/20 transition-colors"
+                            disabled={globalCooldown > 0}
+                            className={`bg-brand-accent/10 text-brand-accent border border-brand-accent/20 px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 transition-colors ${globalCooldown > 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-brand-accent/20'}`}
                             title="Notify Again"
                           >
-                            <Check size={16} /> NOTIFIED
+                            <Check size={16} /> 
+                            {globalCooldown > 0 ? `WAIT (${globalCooldown}s)` : 'NOTIFIED'}
                           </button>
                         )}
                         
@@ -438,10 +492,7 @@ export default function App() {
             <div className="flex justify-between items-center mb-6">
               <h3 className="font-cinzel text-xl font-semibold text-brand-text">Assign Table</h3>
               <button 
-                onClick={() => {
-                  setCustomerToNotify(null);
-                  setSelectedTable('');
-                }} 
+                onClick={closeModal} 
                 className="text-brand-muted hover:text-brand-text transition-colors p-1"
               >
                 <X size={24} />
@@ -462,7 +513,8 @@ export default function App() {
                 <select
                   value={selectedTable}
                   onChange={(e) => setSelectedTable(e.target.value)}
-                  className="w-full bg-brand-bg border border-brand-border rounded-xl px-4 py-3.5 text-brand-text focus:outline-none focus:border-brand-accent transition-colors appearance-none cursor-pointer"
+                  disabled={dispatchStatus !== 'idle'}
+                  className="w-full bg-brand-bg border border-brand-border rounded-xl px-4 py-3.5 text-brand-text focus:outline-none focus:border-brand-accent transition-colors appearance-none cursor-pointer disabled:opacity-50"
                 >
                   <option value="" disabled>Choose a table...</option>
                   {Object.entries(TABLE_MAP).map(([category, count]) => (
@@ -481,14 +533,43 @@ export default function App() {
               </div>
             </div>
 
-            <button
-              onClick={confirmNotify}
-              disabled={!selectedTable}
-              className="w-full bg-[#25D366] text-black font-semibold py-3.5 rounded-xl hover:bg-[#20b858] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              <MessageCircle size={20} />
-              SEND WHATSAPP
-            </button>
+            {dispatchStatus === 'idle' && (
+              <button
+                onClick={startAntiSpamTimer}
+                disabled={!selectedTable}
+                className="w-full bg-brand-text text-brand-bg font-semibold py-3.5 rounded-xl hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                PREPARE NOTIFICATION
+              </button>
+            )}
+
+            {dispatchStatus === 'counting' && (
+              <button
+                disabled
+                className="w-full bg-brand-bg border border-brand-accent/50 text-brand-accent font-mono py-3.5 rounded-xl opacity-80 flex items-center justify-center gap-2 shadow-inner"
+              >
+                <Clock size={16} className="animate-pulse" />
+                Sending message in {countdown} seconds...
+              </button>
+            )}
+
+            {dispatchStatus === 'ready' && (
+              <div className="space-y-3">
+                <button
+                  onClick={confirmNotify}
+                  className="w-full bg-[#25D366] text-black font-semibold py-3.5 rounded-xl hover:bg-[#20b858] transition-colors flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(37,211,102,0.3)]"
+                >
+                  <MessageCircle size={20} />
+                  DISPATCH MESSAGE NOW
+                </button>
+                <button
+                  onClick={triggerErrorCooldown}
+                  className="w-full text-brand-muted hover:text-red-400 font-medium py-2 rounded-xl hover:bg-red-500/10 transition-colors text-sm"
+                >
+                  Report WhatsApp Error (60s Cooldown)
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
