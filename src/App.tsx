@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Clock, Users, MessageCircle, Check, Trash2, Plus, Minus, X, History as HistoryIcon, List } from 'lucide-react';
+import { Clock, Users, MessageCircle, Check, Trash2, Plus, Minus, X, History as HistoryIcon, List, Loader2, CheckCircle2 } from 'lucide-react';
 
 interface Customer {
   id: string;
@@ -16,6 +16,12 @@ interface Customer {
   status: 'WAITING' | 'NOTIFIED' | 'SEATED';
   assignedTable?: string;
   seatedAt?: number;
+  syncStatus?: 'syncing' | 'confirmed';
+}
+
+interface QueueState {
+  timeLeft: number;
+  status: 'counting' | 'ready';
 }
 
 const TABLE_MAP = {
@@ -51,10 +57,10 @@ export default function App() {
   const [customerToNotify, setCustomerToNotify] = useState<Customer | null>(null);
   const [selectedTable, setSelectedTable] = useState('');
   
-  // Anti-Spam Human Mimicry States
-  const [dispatchStatus, setDispatchStatus] = useState<'idle' | 'counting' | 'ready'>('idle');
-  const [countdown, setCountdown] = useState(0);
+  // Anti-Spam Human Mimicry States (Now localized to customer queue)
   const [globalCooldown, setGlobalCooldown] = useState(0);
+  const [backgroundQueue, setBackgroundQueue] = useState<Record<string, QueueState>>({});
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Update timer every minute
   useEffect(() => {
@@ -76,16 +82,31 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [globalCooldown]);
 
-  // Modal Dispatch Countdown
+  // Background Queue Countdown
   useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (dispatchStatus === 'counting' && countdown > 0) {
-      timer = setTimeout(() => setCountdown(c => c - 1), 1000);
-    } else if (dispatchStatus === 'counting' && countdown === 0) {
-      setDispatchStatus('ready');
-    }
-    return () => clearTimeout(timer);
-  }, [dispatchStatus, countdown]);
+    const activeIds = Object.keys(backgroundQueue).filter(id => backgroundQueue[id].status === 'counting');
+    if (activeIds.length === 0) return;
+
+    const timer = setInterval(() => {
+      setBackgroundQueue(prev => {
+        const next = { ...prev };
+        activeIds.forEach(id => {
+          if (next[id].timeLeft > 1) {
+            next[id] = { ...next[id], timeLeft: next[id].timeLeft - 1 };
+          } else if (next[id].timeLeft === 1) {
+            next[id] = { ...next[id], timeLeft: 0, status: 'ready' };
+          }
+        });
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [backgroundQueue]);
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
   const validatePhone = (p: string) => {
     const cleaned = p.replace(/\D/g, '');
@@ -128,14 +149,16 @@ export default function App() {
       return;
     }
 
+    const newId = crypto.randomUUID();
     const newCustomer: Customer = {
-      id: crypto.randomUUID(),
+      id: newId,
       name: name.trim(),
       phone: formatPhoneForWhatsApp(phone),
       originalPhone: phone,
       partySize,
       addedAt: Date.now(),
       status: 'WAITING',
+      syncStatus: 'syncing',
     };
 
     setCustomers((prev) => [...prev, newCustomer]);
@@ -143,33 +166,49 @@ export default function App() {
     setPhone('');
     setPartySize(2);
     setActiveTab('waiting'); // Switch to waiting list to see the new addition
+    showToast('Guest booking added successfully.');
+
+    // Simulate Background Sync (1.5s delay)
+    setTimeout(() => {
+      setCustomers((prev) => prev.map(c => c.id === newId ? { ...c, syncStatus: 'confirmed' } : c));
+    }, 1500);
   };
 
   const closeModal = () => {
     setCustomerToNotify(null);
     setSelectedTable('');
-    setDispatchStatus('idle');
   };
 
   const handleNotifyClick = (customer: Customer) => {
     setCustomerToNotify(customer);
     setSelectedTable(customer.assignedTable || '');
-    setDispatchStatus('idle');
   };
 
   const startAntiSpamTimer = () => {
-    setDispatchStatus('counting');
-    setCountdown(Math.floor(Math.random() * (49 - 30 + 1)) + 30);
+    if (!customerToNotify) return;
+    
+    // Move customer to background queue
+    setBackgroundQueue(prev => ({
+      ...prev,
+      [customerToNotify.id]: {
+        timeLeft: Math.floor(Math.random() * (49 - 30 + 1)) + 30,
+        status: 'counting'
+      }
+    }));
+    
+    // Save assigned table so it's ready for dispatch
+    setCustomers(prev => prev.map(c => c.id === customerToNotify.id ? { ...c, assignedTable: selectedTable } : c));
+    
+    closeModal();
   };
 
   const triggerErrorCooldown = () => {
     setGlobalCooldown(60);
-    closeModal();
-    console.warn("Error logged: Fallback cooldown initiated for 60 seconds.");
+    showToast('System paused for 60s cooldown.');
   };
 
-  const confirmNotify = () => {
-    if (!customerToNotify || !selectedTable) return;
+  const confirmNotify = (customer: Customer) => {
+    if (!customer.assignedTable) return;
 
     const templates = [
       (name: string, count: number, table: string) => `Welcome back, *${name}*. Your table for *${count}* at *${table}* is all set and waiting for you at Cartel. Please head to the host stand when you arrive—we’ll take care of the rest. See you soon.\n\n*Cartel Coffee Roasters | The Art of Specialty.*`,
@@ -178,20 +217,25 @@ export default function App() {
     ];
 
     const randomTemplate = templates[Math.floor(Math.random() * templates.length)];
-    const message = randomTemplate(customerToNotify.name, customerToNotify.partySize, selectedTable);
+    const message = randomTemplate(customer.name, customer.partySize, customer.assignedTable);
 
     const encodedMessage = encodeURIComponent(message);
-    const whatsappUrl = `https://wa.me/${customerToNotify.phone.replace('+', '')}?text=${encodedMessage}`;
+    const whatsappUrl = `https://wa.me/${customer.phone.replace('+', '')}?text=${encodedMessage}`;
     
     // Open WhatsApp
     window.open(whatsappUrl, '_blank');
 
-    // Update status and assigned table
+    // Update status 
     setCustomers((prev) =>
-      prev.map((c) => (c.id === customerToNotify.id ? { ...c, status: 'NOTIFIED', assignedTable: selectedTable } : c))
+      prev.map((c) => (c.id === customer.id ? { ...c, status: 'NOTIFIED' } : c))
     );
     
-    closeModal();
+    // Remove from queue
+    setBackgroundQueue(prev => {
+      const next = { ...prev };
+      delete next[customer.id];
+      return next;
+    });
   };
 
   const markSeated = (id: string) => {
@@ -210,7 +254,25 @@ export default function App() {
   const seatedCustomers = customers.filter((c) => c.status === 'SEATED');
 
   return (
-    <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto pb-24">
+    <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto pb-24 relative overflow-hidden">
+      {/* Toast Notification */}
+      <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${toastMessage ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-8 pointer-events-none'}`}>
+        <div className="bg-white/10 backdrop-blur-xl border border-white/20 text-brand-text px-6 py-3 rounded-full flex flex-row items-center gap-3 shadow-2xl">
+          <CheckCircle2 size={18} className="text-[#25D366]" />
+          <span className="font-medium text-sm tracking-wide">{toastMessage}</span>
+        </div>
+      </div>
+
+      <div className="absolute top-4 right-4 z-40">
+        <button
+          onClick={triggerErrorCooldown}
+          className="bg-brand-bg/80 backdrop-blur-md border border-brand-border text-brand-muted hover:text-red-400 text-xs px-3 py-1.5 rounded-lg shadow-sm transition-colors"
+          title="Force System Cooldown (60s)"
+        >
+          {globalCooldown > 0 ? `COOLDOWN (${globalCooldown}s)` : 'Report API Error'}
+        </button>
+      </div>
+
       {/* Header */}
       <header className="flex flex-col items-center justify-center mb-12 mt-4">
         <img 
@@ -365,6 +427,11 @@ export default function App() {
                         <div>
                           <h3 className="font-semibold text-lg text-brand-text flex items-center gap-2">
                             {customer.name}
+                            {customer.syncStatus === 'syncing' ? (
+                              <Loader2 size={16} className="text-brand-muted animate-spin" />
+                            ) : customer.syncStatus === 'confirmed' ? (
+                              <CheckCircle2 size={16} className="text-[#25D366]/70" />
+                            ) : null}
                             {customer.assignedTable && (
                               <span className="text-xs font-normal bg-brand-accent/10 text-brand-accent border border-brand-accent/20 px-2 py-0.5 rounded">
                                 {customer.assignedTable}
@@ -387,8 +454,23 @@ export default function App() {
                         </div>
                       </div>
                       
-                      <div className="flex items-center gap-2 sm:gap-3 self-end sm:self-auto">
-                        {customer.status === 'WAITING' ? (
+                      <div className="flex items-center justify-end gap-2 sm:gap-3 lg:w-auto w-full flex-wrap sm:flex-nowrap">
+                        {backgroundQueue[customer.id]?.status === 'counting' ? (
+                          <button 
+                            disabled
+                            className="bg-brand-bg border border-brand-accent/30 text-brand-accent px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-mono opacity-80"
+                          >
+                            <Clock size={16} className="animate-pulse" />
+                            {backgroundQueue[customer.id].timeLeft}s
+                          </button>
+                        ) : backgroundQueue[customer.id]?.status === 'ready' ? (
+                          <button 
+                            onClick={() => confirmNotify(customer)} 
+                            className="bg-[#25D366] text-black px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-bold shadow-[0_0_12px_rgba(37,211,102,0.4)] hover:bg-[#20b858] transition-colors"
+                          >
+                            <MessageCircle size={16} /> DISPATCH NOW
+                          </button>
+                        ) : customer.status === 'WAITING' ? (
                           <button 
                             onClick={() => handleNotifyClick(customer)} 
                             disabled={globalCooldown > 0}
@@ -411,7 +493,7 @@ export default function App() {
                         
                         <button 
                           onClick={() => markSeated(customer.id)} 
-                          className="bg-brand-bg border border-brand-border text-brand-text px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium hover:border-brand-text transition-colors"
+                          className="bg-brand-bg border border-brand-border text-brand-text px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium hover:border-brand-text transition-colors flex-shrink-0"
                           title="Mark as Seated"
                         >
                           SEAT
@@ -419,7 +501,7 @@ export default function App() {
                         
                         <button 
                           onClick={() => deleteCustomer(customer.id)} 
-                          className="text-brand-muted hover:text-red-400 p-2.5 rounded-xl hover:bg-red-500/10 transition-colors ml-1"
+                          className="text-brand-muted hover:text-red-400 p-2.5 rounded-xl hover:bg-red-500/10 transition-colors ml-1 flex-shrink-0"
                           title="Remove from list"
                         >
                           <Trash2 size={18} />
@@ -513,8 +595,7 @@ export default function App() {
                 <select
                   value={selectedTable}
                   onChange={(e) => setSelectedTable(e.target.value)}
-                  disabled={dispatchStatus !== 'idle'}
-                  className="w-full bg-brand-bg border border-brand-border rounded-xl px-4 py-3.5 text-brand-text focus:outline-none focus:border-brand-accent transition-colors appearance-none cursor-pointer disabled:opacity-50"
+                  className="w-full bg-brand-bg border border-brand-border rounded-xl px-4 py-3.5 text-brand-text focus:outline-none focus:border-brand-accent transition-colors appearance-none cursor-pointer"
                 >
                   <option value="" disabled>Choose a table...</option>
                   {Object.entries(TABLE_MAP).map(([category, count]) => (
@@ -533,43 +614,14 @@ export default function App() {
               </div>
             </div>
 
-            {dispatchStatus === 'idle' && (
-              <button
-                onClick={startAntiSpamTimer}
-                disabled={!selectedTable}
-                className="w-full bg-brand-text text-brand-bg font-semibold py-3.5 rounded-xl hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                PREPARE NOTIFICATION
-              </button>
-            )}
-
-            {dispatchStatus === 'counting' && (
-              <button
-                disabled
-                className="w-full bg-brand-bg border border-brand-accent/50 text-brand-accent font-mono py-3.5 rounded-xl opacity-80 flex items-center justify-center gap-2 shadow-inner"
-              >
-                <Clock size={16} className="animate-pulse" />
-                Sending message in {countdown} seconds...
-              </button>
-            )}
-
-            {dispatchStatus === 'ready' && (
-              <div className="space-y-3">
-                <button
-                  onClick={confirmNotify}
-                  className="w-full bg-[#25D366] text-black font-semibold py-3.5 rounded-xl hover:bg-[#20b858] transition-colors flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(37,211,102,0.3)]"
-                >
-                  <MessageCircle size={20} />
-                  DISPATCH MESSAGE NOW
-                </button>
-                <button
-                  onClick={triggerErrorCooldown}
-                  className="w-full text-brand-muted hover:text-red-400 font-medium py-2 rounded-xl hover:bg-red-500/10 transition-colors text-sm"
-                >
-                  Report WhatsApp Error (60s Cooldown)
-                </button>
-              </div>
-            )}
+            <button
+              onClick={startAntiSpamTimer}
+              disabled={!selectedTable}
+              className="w-full bg-brand-text text-brand-bg font-semibold py-3.5 rounded-xl hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              <Clock size={18} />
+              PREPARE NOTIFICATION
+            </button>
           </div>
         </div>
       )}
