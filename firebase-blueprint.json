@@ -1,0 +1,51 @@
+{
+  "entities": {
+    "Table": {
+      "title": "Table",
+      "description": "A physical table on the restaurant floor plan.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "status": { "type": "string", "enum": ["available", "reserved", "occupied", "paid"] },
+        "customerName": { "type": "string" },
+        "partySize": { "type": "number" },
+        "minCapacity": { "type": "number" },
+        "maxCapacity": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "label", "x", "y", "status", "updatedAt"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "A guest waiting for a table.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "originalPhone": { "type": "string" },
+        "partySize": { "type": "number" },
+        "addedAt": { "type": "number" },
+        "status": { "type": "string", "enum": ["WAITING", "NOTIFIED", "SEATED"] },
+        "assignedTable": { "type": "string" },
+        "seatedAt": { "type": "number" },
+        "syncStatus": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "phone", "partySize", "addedAt", "status", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/tables/{tableId}": {
+      "schema": { "$ref": "#/entities/Table" },
+      "description": "Collection of all tables and their live statuses."
+    },
+    "/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/Customer" },
+      "description": "Waiting list containing current queued customers and their states."
+    }
+  }
+}

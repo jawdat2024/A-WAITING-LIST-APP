@@ -4,7 +4,11 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Clock, Users, MessageCircle, Check, Trash2, Plus, Minus, X, History as HistoryIcon, List, Loader2, CheckCircle2 } from 'lucide-react';
+import { Clock, Users, MessageCircle, Check, Trash2, Plus, Minus, X, History as HistoryIcon, List, Loader2, CheckCircle2, Map as MapIcon, Maximize2, Minimize2 } from 'lucide-react';
+import { useFloorPlan } from './context/FloorPlanContext';
+import FloorPlanManager from './components/FloorPlanManager';
+import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { db, auth } from './lib/firebase';
 
 interface Customer {
   id: string;
@@ -28,24 +32,27 @@ const TABLE_MAP = {
   'BAR': 7,
   'LOUNGE': 6,
   'COUCH': 7,
-  'ROUND TABLES': 5,
+  'ROUND': 5,
   'BENCH': 7,
   'ROOFTOP': 10,
   'OUTDOOR': 10
 };
 
 export default function App() {
-  const [customers, setCustomers] = useState<Customer[]>(() => {
-    const saved = localStorage.getItem('cartel_waiting_list');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return [];
-      }
-    }
-    return [];
-  });
+  const { tables, updateTable, resetFloorPlan } = useFloorPlan();
+
+  const [customers, setCustomers] = useState<Customer[]>([]);
+
+  // Remote Sync Hook
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const unsub = onSnapshot(collection(db, 'customers'), (snapshot) => {
+      const liveCustomers: Customer[] = [];
+      snapshot.forEach(doc => liveCustomers.push(doc.data({ serverTimestamps: 'estimate' }) as Customer));
+      setCustomers(liveCustomers);
+    });
+    return () => unsub();
+  }, []);
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -53,9 +60,11 @@ export default function App() {
   const [now, setNow] = useState(Date.now());
   const [error, setError] = useState('');
   
-  const [activeTab, setActiveTab] = useState<'waiting' | 'history'>('waiting');
+  const [activeTab, setActiveTab] = useState<'waiting' | 'history' | 'map'>('waiting');
   const [customerToNotify, setCustomerToNotify] = useState<Customer | null>(null);
   const [selectedTable, setSelectedTable] = useState('');
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   
   // Anti-Spam Human Mimicry States (Now localized to customer queue)
   const [globalCooldown, setGlobalCooldown] = useState(0);
@@ -67,11 +76,6 @@ export default function App() {
     const interval = setInterval(() => setNow(Date.now()), 60000);
     return () => clearInterval(interval);
   }, []);
-
-  // Save to local storage whenever customers change
-  useEffect(() => {
-    localStorage.setItem('cartel_waiting_list', JSON.stringify(customers));
-  }, [customers]);
 
   // Anti-Spam Global Cooldown Timer
   useEffect(() => {
@@ -102,6 +106,18 @@ export default function App() {
     }, 1000);
     return () => clearInterval(timer);
   }, [backgroundQueue]);
+
+  // Keyboard shortcut for fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key.toLowerCase() === 'f' && activeTab === 'waiting') {
+        setIsFullscreen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTab]);
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -135,7 +151,32 @@ export default function App() {
     return `${diffMins} min`;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const updateCustomer = async (id: string, updates: Partial<Customer>) => {
+    const previous = [...customers];
+    setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
+    try {
+      const filtered = Object.fromEntries(Object.entries(updates).filter(([v]) => v !== undefined));
+      await updateDoc(doc(db, 'customers', id), { ...filtered, updatedAt: serverTimestamp() });
+    } catch (e) {
+      console.error(e);
+      setCustomers(previous);
+      showToast("Sync failed. Reverted state.");
+    }
+  };
+
+  const removeCustomer = async (id: string) => {
+    const previous = [...customers];
+    setCustomers(prev => prev.filter(c => c.id !== id));
+    try {
+      await deleteDoc(doc(db, 'customers', id));
+    } catch (e) {
+      console.error(e);
+      setCustomers(previous);
+      showToast("Sync failed. Reverted state.");
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -161,17 +202,22 @@ export default function App() {
       syncStatus: 'syncing',
     };
 
+    const previous = [...customers];
     setCustomers((prev) => [...prev, newCustomer]);
     setName('');
     setPhone('');
     setPartySize(2);
-    setActiveTab('waiting'); // Switch to waiting list to see the new addition
+    setActiveTab('waiting');
     showToast('Guest booking added successfully.');
 
-    // Simulate Background Sync (1.5s delay)
-    setTimeout(() => {
-      setCustomers((prev) => prev.map(c => c.id === newId ? { ...c, syncStatus: 'confirmed' } : c));
-    }, 1500);
+    try {
+      await setDoc(doc(db, 'customers', newId), { ...newCustomer, updatedAt: serverTimestamp() });
+      await updateDoc(doc(db, 'customers', newId), { syncStatus: 'confirmed', updatedAt: serverTimestamp() });
+    } catch (err) {
+      console.error(err);
+      setCustomers(previous);
+      showToast("Failed to add guest to database.");
+    }
   };
 
   const closeModal = () => {
@@ -191,13 +237,19 @@ export default function App() {
     setBackgroundQueue(prev => ({
       ...prev,
       [customerToNotify.id]: {
-        timeLeft: Math.floor(Math.random() * (49 - 30 + 1)) + 30,
+        timeLeft: Math.floor(Math.random() * (15 - 10 + 1)) + 10,
         status: 'counting'
       }
     }));
     
     // Save assigned table so it's ready for dispatch
-    setCustomers(prev => prev.map(c => c.id === customerToNotify.id ? { ...c, assignedTable: selectedTable } : c));
+    updateCustomer(customerToNotify.id, { assignedTable: selectedTable });
+    
+    // Instantly reserve the table on the floor map
+    const tableId = tables.find(t => t.label === selectedTable)?.id;
+    if (tableId) {
+      updateTable(tableId, { status: 'reserved', customerName: customerToNotify.name, partySize: customerToNotify.partySize });
+    }
     
     closeModal();
   };
@@ -226,9 +278,7 @@ export default function App() {
     window.open(whatsappUrl, '_blank');
 
     // Update status 
-    setCustomers((prev) =>
-      prev.map((c) => (c.id === customer.id ? { ...c, status: 'NOTIFIED' } : c))
-    );
+    updateCustomer(customer.id, { status: 'NOTIFIED' });
     
     // Remove from queue
     setBackgroundQueue(prev => {
@@ -239,21 +289,62 @@ export default function App() {
   };
 
   const markSeated = (id: string) => {
-    setCustomers((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, status: 'SEATED', seatedAt: Date.now() } : c))
-    );
+    // Find customer to see what table they were assigned to
+    const customer = customers.find(c => c.id === id);
+    if (customer?.assignedTable) {
+      const tableId = tables.find(t => t.label === customer.assignedTable)?.id;
+      if (tableId) {
+        // Find existing table data to avoid clearing status if it was already updated from map
+        const existingTable = tables.find(t => t.id === tableId);
+        if (existingTable && existingTable.status === 'reserved') {
+          updateTable(tableId, { status: 'occupied' });
+        }
+      }
+    }
+
+    updateCustomer(id, { status: 'SEATED', seatedAt: Date.now() });
   };
 
   const deleteCustomer = (id: string) => {
     if (window.confirm('Are you sure you want to remove this guest from the list?')) {
-      setCustomers((prev) => prev.filter((c) => c.id !== id));
+      const customer = customers.find(c => c.id === id);
+      if (customer?.assignedTable && customer.status !== 'SEATED') {
+        const tableId = tables.find(t => t.label === customer.assignedTable)?.id;
+        if (tableId) {
+          updateTable(tableId, { status: 'available', customerName: undefined, partySize: undefined });
+        }
+      }
+      removeCustomer(id);
+    }
+  };
+
+  const clearHistory = async () => {
+    resetFloorPlan();
+    
+    const previous = [...customers];
+    setCustomers([]);
+    setShowResetModal(false);
+    showToast('Floor plan and history have been cleared.');
+
+    try {
+      const batch = writeBatch(db);
+      customers.forEach(c => {
+        batch.delete(doc(db, 'customers', c.id));
+      });
+      await batch.commit();
+    } catch (e) {
+      console.error(e);
+      setCustomers(previous);
+      showToast("Failed to clear history.");
     }
   };
 
   const activeCustomers = customers.filter((c) => c.status !== 'SEATED');
   const seatedCustomers = customers.filter((c) => c.status === 'SEATED');
+  const isSystemDirty = customers.length > 0 || tables.some(t => t.status !== 'available');
 
   return (
+    <>
     <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto pb-24 relative overflow-hidden">
       {/* Toast Notification */}
       <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${toastMessage ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-8 pointer-events-none'}`}>
@@ -390,6 +481,17 @@ export default function App() {
               </span>
             </button>
             <button
+              onClick={() => setActiveTab('map')}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-medium text-sm transition-colors ${
+                activeTab === 'map' 
+                  ? 'bg-brand-bg text-brand-text shadow-sm border border-brand-border' 
+                  : 'text-brand-muted hover:text-brand-text'
+              }`}
+            >
+              <MapIcon size={18} />
+              Floor Map
+            </button>
+            <button
               onClick={() => setActiveTab('history')}
               className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-medium text-sm transition-colors ${
                 activeTab === 'history' 
@@ -407,7 +509,21 @@ export default function App() {
 
           {/* Tab Content: Waiting List */}
           {activeTab === 'waiting' && (
-            <div>
+            <div className={`transition-all duration-300 relative ${isFullscreen ? 'fixed inset-0 z-[100] bg-[#0a0a0a]/95 backdrop-blur-3xl p-6 md:p-12 overflow-y-auto w-full h-full' : ''}`}>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className={`font-cinzel font-semibold text-brand-text ${isFullscreen ? 'text-3xl' : 'text-xl'}`}>Waiting List</h2>
+                <div className="flex-1" />
+                <button
+                  onClick={() => setIsFullscreen(!isFullscreen)}
+                  className="p-2 rounded-lg bg-white/5 border border-white/10 text-white hover:bg-white/10 backdrop-blur-md transition-colors group relative ml-auto"
+                >
+                  {isFullscreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
+                  <span className="absolute -top-10 left-1/2 -translate-x-1/2 bg-black/80 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-lg border border-white/10 backdrop-blur-md">
+                    [F] Toggle
+                  </span>
+                </button>
+              </div>
+
               {activeCustomers.length === 0 ? (
                 <div className="bg-brand-card border border-brand-border border-dashed rounded-2xl p-12 text-center">
                   <Users size={48} className="mx-auto text-brand-muted/30 mb-4" />
@@ -514,9 +630,29 @@ export default function App() {
             </div>
           )}
 
+          {/* Tab Content: Floor Map */}
+          {activeTab === 'map' && (
+            <div className="animate-in fade-in duration-300 relative z-10 w-full">
+              <FloorPlanManager />
+            </div>
+          )}
+
           {/* Tab Content: History */}
           {activeTab === 'history' && (
-            <div>
+            <div className="animate-in fade-in duration-300">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="font-cinzel text-xl font-semibold text-brand-text">Seating History</h2>
+                {isSystemDirty && (
+                  <button 
+                    onClick={() => setShowResetModal(true)}
+                    className="flex items-center gap-2 text-xs font-medium text-brand-muted hover:text-red-400 bg-brand-bg px-3 py-1.5 rounded-lg border border-brand-border transition-colors hover:border-red-500/30 hover:bg-red-500/10"
+                  >
+                    <Trash2 size={14} />
+                    Clear All History
+                  </button>
+                )}
+              </div>
+
               {seatedCustomers.length === 0 ? (
                 <div className="bg-brand-card border border-brand-border border-dashed rounded-2xl p-12 text-center">
                   <HistoryIcon size={48} className="mx-auto text-brand-muted/30 mb-4" />
@@ -625,6 +761,37 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Reset Floor Plan Confirmation Modal */}
+      {showResetModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-3xl flex items-center justify-center z-[110] p-4">
+          <div className="bg-[#1c1c1e]/95 border border-white/20 rounded-3xl p-8 w-full max-w-md shadow-2xl flex flex-col items-center">
+            <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mb-6 border border-red-500/30">
+              <Trash2 size={28} className="text-red-400" />
+            </div>
+            <h3 className="font-cinzel text-xl font-bold text-white mb-2 tracking-wide">Clear All History?</h3>
+            <p className="text-sm text-white/60 mb-8 text-center font-sans">
+              This action cannot be undone. All active waiting list entries, seated history, and floor plan statuses will be completely reset.
+            </p>
+            
+            <div className="flex w-full gap-3">
+              <button 
+                onClick={() => setShowResetModal(false)}
+                className="flex-1 bg-white/5 border border-white/10 text-white hover:bg-white/10 py-3.5 rounded-xl font-medium transition-colors font-sans"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={clearHistory}
+                className="flex-1 bg-red-500 text-white py-3.5 rounded-xl font-medium shadow-[0_0_15px_rgba(239,68,68,0.4)] hover:bg-red-400 transition-colors font-sans"
+              >
+                Confirm Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+    </>
   );
 }

@@ -1,0 +1,91 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- PRIMITIVE DEFINITIONS ---
+    function isSignedIn() { 
+      return request.auth != null && request.auth.token.email_verified == true; 
+    }
+    
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+
+    function isValidTable(data) {
+      return data.keys().hasAll(['id', 'label', 'x', 'y', 'status', 'updatedAt'])
+        && data.id is string && data.id.size() <= 64
+        && data.label is string && data.label.size() <= 64
+        && data.x is number 
+        && data.y is number
+        && data.status in ['available', 'reserved', 'occupied', 'paid']
+        && (data.get('customerName', '') is string && data.get('customerName', '').size() <= 128)
+        && (data.get('partySize', 0) is number)
+        && (data.get('minCapacity', 0) is number)
+        && (data.get('maxCapacity', 0) is number);
+    }
+
+    function isValidCustomer(data) {
+      return data.keys().hasAll(['id', 'name', 'phone', 'partySize', 'addedAt', 'status', 'updatedAt'])
+        && data.id is string && data.id.size() <= 64
+        && data.name is string && data.name.size() <= 128
+        && data.phone is string && data.phone.size() <= 64
+        && data.partySize is number
+        && data.addedAt is number
+        && data.status in ['WAITING', 'NOTIFIED', 'SEATED']
+        && (data.get('assignedTable', '') is string && data.get('assignedTable', '').size() <= 64)
+        && (data.get('seatedAt', 0) is number)
+        && (data.get('syncStatus', '') is string && data.get('syncStatus', '').size() <= 32)
+        && (data.get('originalPhone', '') is string && data.get('originalPhone', '').size() <= 64);
+    }
+
+    // --- COLLECTIONS ---
+
+    match /tables/{tableId} {
+      // Allow read/list: Only verified staff
+      allow read, list: if isSignedIn() && isValidId(tableId);
+
+      // Create: Enforce strict schema and timestamp
+      allow create: if isSignedIn() 
+        && isValidId(tableId)
+        && incoming().keys().hasOnly(['id', 'label', 'x', 'y', 'status', 'customerName', 'partySize', 'minCapacity', 'maxCapacity', 'updatedAt'])
+        && isValidTable(incoming())
+        && incoming().updatedAt == request.time;
+        
+      // Update: Action-Based pattern
+      allow update: if isSignedIn() 
+        && isValidId(tableId)
+        && isValidTable(incoming())
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasAny(['status', 'customerName', 'partySize', 'updatedAt']);
+
+      allow delete: if false; // Tables shouldn't be deleted after creation
+    }
+
+    match /customers/{customerId} {
+      // Allow read/list: Only verified staff
+      allow read, list: if isSignedIn() && isValidId(customerId);
+
+      allow create: if isSignedIn() 
+        && isValidId(customerId)
+        && incoming().keys().hasOnly(['id', 'name', 'phone', 'originalPhone', 'partySize', 'addedAt', 'status', 'assignedTable', 'seatedAt', 'syncStatus', 'updatedAt'])
+        && isValidCustomer(incoming())
+        && incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn()
+        && isValidId(customerId)
+        && isValidCustomer(incoming())
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasAny(['status', 'assignedTable', 'seatedAt', 'syncStatus', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(customerId);
+    }
+  }
+}
