@@ -113,7 +113,16 @@ export default function FloorPlanManager() {
           minScale={0.4}
           maxScale={2}
           centerOnInit={true}
-          wheel={{ step: 0.05 }}
+          wheel={{ step: 0.025 }}
+          pinch={{ step: 2.5 }}
+          panning={{ 
+            velocityDisabled: false,
+          }}
+          velocityAnimation={{
+            animationTime: 1200, 
+            animationType: "easeOut"
+          }}
+          doubleClick={{ disabled: true }}
         >
           {({ zoomIn, zoomOut, resetTransform }) => (
             <>

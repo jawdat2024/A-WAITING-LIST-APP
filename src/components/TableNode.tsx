@@ -90,7 +90,7 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTar
       layoutId={`table-${table.id}`}
       drag="x"
       dragConstraints={{ left: 0, right: 0 }}
-      dragElastic={0.2}
+      dragElastic={0.1}
       onDragEnd={(e, info) => {
         if (info.offset.x > 50) {
           // A rough simulation of swiping to show/initiate swapping or doing something
@@ -99,11 +99,11 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTar
       }}
       onClick={(e) => onTap(e, table)}
       className={baseClasses}
-      whileHover={{ scale: 1.03 }}
-      whileTap={{ scale: 0.95 }}
+      whileHover={{ scale: 1.015 }}
+      whileTap={{ scale: 0.97 }}
       initial={false}
-      animate={{ scale: isActive ? 1.08 : 1 }}
-      transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+      animate={{ scale: isActive ? 1.04 : 1 }}
+      transition={{ type: 'spring', stiffness: 200, damping: 40, mass: 1.5 }}
     >
       {/* Table Label */}
       <div className={cn('absolute -top-2 px-1.5 py-0.5 rounded bg-black border border-white/10 text-[9px] font-light tracking-[0.2em] uppercase text-white/90 whitespace-nowrap z-10', shape === 'bench' && '-top-2.5')}>
