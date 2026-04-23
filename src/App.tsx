@@ -45,7 +45,6 @@ export default function App() {
 
   // Remote Sync Hook
   useEffect(() => {
-    if (!auth.currentUser) return;
     const unsub = onSnapshot(collection(db, 'customers'), (snapshot) => {
       const liveCustomers: Customer[] = [];
       snapshot.forEach(doc => liveCustomers.push(doc.data({ serverTimestamps: 'estimate' }) as Customer));
