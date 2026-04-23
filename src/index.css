@@ -26,4 +26,31 @@ body {
     -ms-overflow-style: none; /* IE and Edge */
     scrollbar-width: none; /* Firefox */
   }
+
+  /* Luxury 'Heavy & Smooth' Fast-path Overrides */
+  .transition-all {
+    transition-property: all;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1) !important;
+    transition-duration: 800ms !important;
+  }
+  .transition-colors {
+    transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1) !important;
+    transition-duration: 800ms !important;
+  }
+  .transition-opacity {
+    transition-property: opacity;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1) !important;
+    transition-duration: 800ms !important;
+  }
+  .transition-transform {
+    transition-property: transform;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1) !important;
+    transition-duration: 800ms !important;
+  }
+  .transition {
+    transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1) !important;
+    transition-duration: 800ms !important;
+  }
 }

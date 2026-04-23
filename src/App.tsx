@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Clock, Users, MessageCircle, Check, Trash2, Plus, Minus, X, History as HistoryIcon, List, Loader2, CheckCircle2, Map as MapIcon, Maximize2, Minimize2, Lock } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useFloorPlan } from './context/FloorPlanContext';
 import { useKioskAuth } from './components/AuthWrapper';
 import FloorPlanManager from './components/FloorPlanManager';
@@ -518,9 +519,17 @@ export default function App() {
             </button>
           </div>
 
-          {/* Tab Content: Waiting List */}
-          {activeTab === 'waiting' && (
-            <div className={`transition-all duration-300 relative ${isFullscreen ? 'fixed inset-0 z-[100] bg-[#0a0a0a]/95 backdrop-blur-3xl p-6 md:p-12 overflow-y-auto w-full h-full' : ''}`}>
+          <AnimatePresence mode="wait">
+            {/* Tab Content: Waiting List */}
+            {activeTab === 'waiting' && (
+              <motion.div 
+                key="waiting"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+                className={`transition-all duration-300 relative ${isFullscreen ? 'fixed inset-0 z-[100] bg-[#0a0a0a]/95 backdrop-blur-3xl p-6 md:p-12 overflow-y-auto w-full h-full' : ''}`}
+              >
               <div className="flex justify-between items-center mb-4">
                 <h2 className={`font-cinzel font-semibold text-brand-text ${isFullscreen ? 'text-3xl' : 'text-xl'}`}>Waiting List</h2>
                 <div className="flex-1" />
@@ -638,19 +647,32 @@ export default function App() {
                   ))}
                 </div>
               )}
-            </div>
+            </motion.div>
           )}
 
-          {/* Tab Content: Floor Map */}
-          {activeTab === 'map' && (
-            <div className="animate-in fade-in duration-300 relative z-10 w-full">
-              <FloorPlanManager />
-            </div>
-          )}
+            {/* Tab Content: Floor Map */}
+            {activeTab === 'map' && (
+              <motion.div 
+                key="map"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+                className="relative z-10 w-full"
+              >
+                <FloorPlanManager />
+              </motion.div>
+            )}
 
-          {/* Tab Content: History */}
-          {activeTab === 'history' && (
-            <div className="animate-in fade-in duration-300">
+            {/* Tab Content: History */}
+            {activeTab === 'history' && (
+              <motion.div 
+                key="history"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+              >
               <div className="flex justify-between items-center mb-6">
                 <h2 className="font-cinzel text-xl font-semibold text-brand-text">Seating History</h2>
                 {isSystemDirty && (
@@ -709,8 +731,9 @@ export default function App() {
                   ))}
                 </div>
               )}
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
         </div>
       </div>
 

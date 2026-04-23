@@ -10,9 +10,10 @@ interface TableNodeProps {
   isDragTarget?: boolean;
   onTap: (e: React.MouseEvent, table: TableData) => void;
   onDragStart?: () => void;
+  index?: number;
 }
 
-export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTarget, onTap }) => {
+export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTarget, onTap, index = 0 }) => {
   const { status, shape, label, capacity, currentGuest, zone } = table;
 
   // Aesthetic mapping based on status
@@ -101,9 +102,13 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTar
       className={baseClasses}
       whileHover={{ scale: 1.015 }}
       whileTap={{ scale: 0.97 }}
-      initial={false}
-      animate={{ scale: isActive ? 1.04 : 1 }}
-      transition={{ type: 'spring', stiffness: 200, damping: 40, mass: 1.5 }}
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: isActive ? 1.04 : 1 }}
+      transition={{ 
+        opacity: { duration: 0.8, delay: index * 0.05, ease: [0.22, 1, 0.36, 1] },
+        scale: { duration: 0.8, delay: index * 0.05, type: 'spring', stiffness: 200, damping: 40, mass: 1.5 },
+        layout: { type: 'spring', stiffness: 200, damping: 40, mass: 1.5 }
+      }}
     >
       {/* Table Label */}
       <div className={cn('absolute -top-2 px-1.5 py-0.5 rounded bg-black border border-white/10 text-[9px] font-light tracking-[0.2em] uppercase text-white/90 whitespace-nowrap z-10', shape === 'bench' && '-top-2.5')}>

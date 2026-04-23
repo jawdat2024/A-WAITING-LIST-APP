@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { motion, AnimatePresence } from 'motion/react';
-import { Maximize2, ZoomIn, ZoomOut, RotateCcw, AlertTriangle, Radio } from 'lucide-react';
+import { Maximize2, Minimize2, ZoomIn, ZoomOut, RotateCcw, AlertTriangle, Radio } from 'lucide-react';
 import { useFloorPlan, TableData } from '../context/FloorPlanContext';
 import { TableNode } from './TableNode';
 import { TableActionSheet } from './TableActionSheet';
@@ -12,6 +12,26 @@ export default function FloorPlanManager() {
   const [activeTableId, setActiveTableId] = useState<string | null>(null);
   const [swapSourceId, setSwapSourceId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  };
 
   const activeTable = useMemo(() => tables.find(t => t.id === activeTableId) || null, [tables, activeTableId]);
 
@@ -52,7 +72,15 @@ export default function FloorPlanManager() {
   };
 
   return (
-    <div className="w-full bg-[#0a0a0a] rounded-3xl border border-[#1c1c1e] relative overflow-hidden shadow-2xl h-[calc(100vh-140px)] min-h-[600px] flex flex-col">
+    <div 
+      ref={containerRef}
+      className={cn(
+        "w-full bg-[#0a0a0a] relative overflow-hidden shadow-2xl flex flex-col transition-all duration-300",
+        isFullscreen 
+          ? "h-screen rounded-none border-none fixed inset-0 z-[100]" 
+          : "rounded-3xl border border-[#1c1c1e] h-[calc(100vh-140px)] min-h-[600px]"
+      )}
+    >
       
       {/* Live Sync Status (Pulse) */}
       <div className="absolute top-6 right-6 z-50 flex items-center gap-2 bg-[#141414]/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/5 shadow-lg">
@@ -128,6 +156,10 @@ export default function FloorPlanManager() {
             <>
               {/* Floating Map Controls */}
               <div className="absolute bottom-6 right-6 z-40 flex flex-col gap-2">
+                <button onClick={toggleFullscreen} className="w-10 h-10 rounded-full bg-[#141414]/80 backdrop-blur-md border border-white/10 text-white/60 hover:text-white flex items-center justify-center transition-colors shadow-lg">
+                  {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                </button>
+                <div className="w-10 h-[1px] bg-white/10 my-1" />
                 <button onClick={() => zoomIn()} className="w-10 h-10 rounded-full bg-[#141414]/80 backdrop-blur-md border border-white/10 text-white/60 hover:text-white flex items-center justify-center transition-colors shadow-lg">
                   <ZoomIn size={18} />
                 </button>
@@ -168,13 +200,14 @@ export default function FloorPlanManager() {
                             
                             {/* Inner flex layout wrapping the tables */}
                             <div className="flex flex-wrap gap-8 items-center justify-center">
-                              {(zoneTables as TableData[]).map((table) => (
+                              {(zoneTables as TableData[]).map((table, tIndex) => (
                                 <TableNode 
                                   key={table.id}
                                   table={table}
                                   isActive={activeTableId === table.id}
                                   isDragTarget={swapSourceId === table.id}
                                   onTap={handleTableTap}
+                                  index={tIndex}
                                 />
                               ))}
                             </div>

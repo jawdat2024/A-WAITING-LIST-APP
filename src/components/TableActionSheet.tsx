@@ -44,7 +44,7 @@ export function TableActionSheet({ table, onClose, onInitiateSwap }: TableAction
         initial={{ y: '100%' }}
         animate={{ y: 0 }}
         exit={{ y: '100%' }}
-        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+        transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
         className="fixed bottom-0 left-0 right-0 z-[200] max-w-2xl mx-auto pb-safe"
       >
         <div className="bg-[#141414] border-t border-white/10 rounded-t-3xl shadow-[0_-20px_40px_rgba(0,0,0,0.8)] overflow-hidden">
@@ -73,7 +73,7 @@ export function TableActionSheet({ table, onClose, onInitiateSwap }: TableAction
             </div>
 
             {isAssigning ? (
-              <form onSubmit={handleAssignWalkIn} className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
+              <form onSubmit={handleAssignWalkIn} className="space-y-4 animate-in fade-in slide-in-from-bottom-4" style={{ animationDuration: '800ms', animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)' }}>
                 <div className="space-y-4">
                   <div className="relative">
                     <User size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40" />
