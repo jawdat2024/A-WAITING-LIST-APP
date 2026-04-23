@@ -7,7 +7,12 @@ service cloud.firestore {
     }
 
     function isSignedIn() { 
-      return request.auth != null && request.auth.token.email_verified == true; 
+      return request.auth != null 
+        && request.auth.token.email_verified == true
+        && (
+          request.auth.token.email.matches('.*@cartelcoffee\\.com') || 
+          exists(/databases/$(database)/documents/staff/$(request.auth.token.email))
+        );
     }
     
     function incoming() { return request.resource.data; }

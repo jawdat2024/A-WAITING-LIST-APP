@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { collection, doc, onSnapshot, writeBatch, serverTimestamp, getDocs, updateDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, writeBatch, serverTimestamp, getDocs, updateDoc, deleteField } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 
 export type TableStatus = 'available' | 'reserved' | 'occupied' | 'paid';
@@ -89,10 +89,16 @@ export const FloorPlanProvider = ({ children }: { children: ReactNode }) => {
 
     try {
       const docRef = doc(db, 'tables', id);
-      const filteredUpdates = Object.fromEntries(
-        Object.entries(updates).filter(([v]) => v !== undefined)
-      );
-      await updateDoc(docRef, { ...filteredUpdates, updatedAt: serverTimestamp() });
+      const dbUpdates: any = {};
+      for (const [key, value] of Object.entries(updates)) {
+        if (value === undefined || value === null) {
+          dbUpdates[key] = deleteField();
+        } else {
+          dbUpdates[key] = value;
+        }
+      }
+      dbUpdates.updatedAt = serverTimestamp();
+      await updateDoc(docRef, dbUpdates);
     } catch (err) {
       console.error("Failed to update table:", err);
       // Revert on failure
@@ -123,8 +129,8 @@ export const FloorPlanProvider = ({ children }: { children: ReactNode }) => {
       const refA = doc(db, 'tables', idA);
       const refB = doc(db, 'tables', idB);
       
-      batch.update(refA, { status: tB.status, customerName: tB.customerName || null, partySize: tB.partySize || null, updatedAt: serverTimestamp() });
-      batch.update(refB, { status: tA.status, customerName: tA.customerName || null, partySize: tA.partySize || null, updatedAt: serverTimestamp() });
+      batch.update(refA, { status: tB.status, customerName: tB.customerName || deleteField(), partySize: tB.partySize || deleteField(), updatedAt: serverTimestamp() });
+      batch.update(refB, { status: tA.status, customerName: tA.customerName || deleteField(), partySize: tA.partySize || deleteField(), updatedAt: serverTimestamp() });
       
       await batch.commit();
     } catch (err) {
@@ -148,8 +154,8 @@ export const FloorPlanProvider = ({ children }: { children: ReactNode }) => {
       tables.forEach(t => {
         batch.update(doc(db, 'tables', t.id), { 
           status: 'available', 
-          customerName: null, 
-          partySize: null, 
+          customerName: deleteField(), 
+          partySize: deleteField(), 
           updatedAt: serverTimestamp() 
         });
       });
