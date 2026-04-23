@@ -4,8 +4,9 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Clock, Users, MessageCircle, Check, Trash2, Plus, Minus, X, History as HistoryIcon, List, Loader2, CheckCircle2, Map as MapIcon, Maximize2, Minimize2 } from 'lucide-react';
+import { Clock, Users, MessageCircle, Check, Trash2, Plus, Minus, X, History as HistoryIcon, List, Loader2, CheckCircle2, Map as MapIcon, Maximize2, Minimize2, Lock } from 'lucide-react';
 import { useFloorPlan } from './context/FloorPlanContext';
+import { useKioskAuth } from './components/AuthWrapper';
 import FloorPlanManager from './components/FloorPlanManager';
 import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { db, auth } from './lib/firebase';
@@ -49,9 +50,13 @@ export default function App() {
       const liveCustomers: Customer[] = [];
       snapshot.forEach(doc => liveCustomers.push(doc.data({ serverTimestamps: 'estimate' }) as Customer));
       setCustomers(liveCustomers);
+    }, (error) => {
+      console.error("Error listening to customers:", error);
     });
     return () => unsub();
   }, []);
+
+  const { lockTerminal } = useKioskAuth();
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -353,7 +358,14 @@ export default function App() {
         </div>
       </div>
 
-      <div className="absolute top-4 right-4 z-40">
+      <div className="absolute top-4 right-4 z-40 flex items-center gap-2">
+        <button
+          onClick={lockTerminal}
+          className="bg-brand-bg/80 backdrop-blur-md border border-brand-border text-brand-muted hover:text-white px-3 py-1.5 rounded-lg shadow-sm transition-colors flex items-center gap-1.5 text-xs font-medium"
+        >
+          <Lock size={12} />
+          Lock iPad
+        </button>
         <button
           onClick={triggerErrorCooldown}
           className="bg-brand-bg/80 backdrop-blur-md border border-brand-border text-brand-muted hover:text-red-400 text-xs px-3 py-1.5 rounded-lg shadow-sm transition-colors"

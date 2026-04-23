@@ -74,6 +74,19 @@ service cloud.firestore {
         );
     }
 
+    match /restaurants/{restaurantId}/tables_luxury/{tableId} {
+      allow read, write: if isSignedIn();
+    }
+    
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     match /customers/{customerId} {
       allow get: if isSignedIn() && isValidId(customerId);
       allow list: if isSignedIn();
