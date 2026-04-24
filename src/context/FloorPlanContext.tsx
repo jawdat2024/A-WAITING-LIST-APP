@@ -25,8 +25,7 @@ export interface TableData {
   label: string;
 }
 
-const RESTAURANT_ID = 'cartel_coffee';
-const TABLES_COLLECTION = `restaurants/${RESTAURANT_ID}/tables_luxury`; // New collection for the luxury schema
+const TABLES_COLLECTION = 'tables';
 
 const generateTables = (): TableData[] => {
   const tables: TableData[] = [];
@@ -76,11 +75,12 @@ export const FloorPlanProvider = ({ children }: { children: ReactNode }) => {
       unsub = onSnapshot(collection(db, TABLES_COLLECTION), (snapshot) => {
         const serverTables: TableData[] = [];
         snapshot.forEach(doc => {
-          serverTables.push(doc.data({ serverTimestamps: 'estimate' }) as TableData);
+          const data = doc.data({ serverTimestamps: 'estimate' });
+          serverTables.push({ ...data, id: doc.id } as TableData);
         });
         setTables(serverTables);
       }, (error) => {
-        console.error("Error listening to tables_luxury:", error);
+        console.error("Error listening to tables:", error);
       });
     };
     

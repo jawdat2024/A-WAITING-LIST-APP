@@ -62,7 +62,7 @@ export function TableActionSheet({ table, onClose, onInitiateSwap }: TableAction
                 </h3>
                 <div className="flex items-center gap-2 text-xs text-white/40 font-mono tracking-wide">
                   <MapPin size={12} />
-                  <span>{table.zone.toUpperCase()}</span>
+                  <span>{(table.zone || 'Unknown Zone').toUpperCase()}</span>
                   <span className="mx-1">•</span>
                   <span>CAPACITY {table.capacity}</span>
                 </div>

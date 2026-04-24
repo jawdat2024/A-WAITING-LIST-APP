@@ -67,6 +67,7 @@ export default function App() {
   
   const [activeTab, setActiveTab] = useState<'waiting' | 'history' | 'map'>('waiting');
   const [customerToNotify, setCustomerToNotify] = useState<Customer | null>(null);
+  const [pendingSeatCustomer, setPendingSeatCustomer] = useState<Customer | null>(null);
   const [selectedTable, setSelectedTable] = useState('');
   const [showResetModal, setShowResetModal] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -350,7 +351,7 @@ export default function App() {
 
   return (
     <>
-    <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto pb-24 relative overflow-hidden">
+    <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto pb-24 relative overflow-hidden bg-[#0a0a0a]">
       {/* Toast Notification */}
       <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${toastMessage ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-8 pointer-events-none'}`}>
         <div className="bg-white/10 backdrop-blur-xl border border-white/20 text-brand-text px-6 py-3 rounded-full flex flex-row items-center gap-3 shadow-2xl">
@@ -488,9 +489,15 @@ export default function App() {
             >
               <List size={18} />
               Waiting List
-              <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${activeTab === 'waiting' ? 'bg-brand-accent/20 text-brand-accent' : 'bg-brand-border text-brand-muted'}`}>
+              <motion.span 
+                key={`badge-${activeCustomers.length}`}
+                initial={{ scale: 1.4 }}
+                animate={{ scale: 1 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                className={`ml-1 px-2 py-0.5 rounded-full text-xs ${activeTab === 'waiting' ? 'bg-brand-accent/20 text-brand-accent' : 'bg-brand-border text-brand-muted'}`}
+              >
                 {activeCustomers.length}
-              </span>
+              </motion.span>
             </button>
             <button
               onClick={() => setActiveTab('map')}
@@ -628,11 +635,22 @@ export default function App() {
                         )}
                         
                         <button 
+                          onClick={() => {
+                            setPendingSeatCustomer(customer);
+                            setActiveTab('map');
+                          }}
+                          className="bg-white/5 border border-white/10 text-white px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium hover:bg-white/10 transition-colors flex-shrink-0"
+                          title="Seat on Floor Map"
+                        >
+                          <MapIcon size={16} /> MAP SEAT
+                        </button>
+
+                        <button 
                           onClick={() => markSeated(customer.id)} 
                           className="bg-brand-bg border border-brand-border text-brand-text px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium hover:border-brand-text transition-colors flex-shrink-0"
-                          title="Mark as Seated"
+                          title="Mark as Seated Manually"
                         >
-                          SEAT
+                          SEAT (Quick)
                         </button>
                         
                         <button 
@@ -660,7 +678,14 @@ export default function App() {
                 transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
                 className="relative z-10 w-full"
               >
-                <FloorPlanManager />
+                <FloorPlanManager 
+                  pendingSeatCustomer={pendingSeatCustomer} 
+                  onSeatCompleted={(id) => {
+                    markSeated(id);
+                    setPendingSeatCustomer(null);
+                  }}
+                  onSeatCancel={() => setPendingSeatCustomer(null)}
+                />
               </motion.div>
             )}
 

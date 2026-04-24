@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Users, CreditCard } from 'lucide-react';
 import { TableData, useFloorPlan } from '../context/FloorPlanContext';
@@ -11,10 +11,23 @@ interface TableNodeProps {
   onTap: (e: React.MouseEvent, table: TableData) => void;
   onDragStart?: () => void;
   index?: number;
+  isWaitlistTarget?: boolean;
 }
 
-export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTarget, onTap, index = 0 }) => {
-  const { status, shape, label, capacity, currentGuest, zone } = table;
+export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTarget, onTap, index = 0, isWaitlistTarget }) => {
+  const { status = 'available', shape = 'square', label = '?', capacity = 2, currentGuest, zone = 'Main' } = table;
+
+  const [justCleared, setJustCleared] = useState(false);
+  const prevStatus = useRef(status);
+
+  useEffect(() => {
+    if (prevStatus.current !== 'available' && status === 'available') {
+      setJustCleared(true);
+      const t = setTimeout(() => setJustCleared(false), 600);
+      return () => clearTimeout(t);
+    }
+    prevStatus.current = status;
+  }, [status]);
 
   // Aesthetic mapping based on status
   const getStatusStyles = () => {
@@ -26,6 +39,7 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTar
           text: 'text-emerald-500',
         };
       case 'reserved':
+      case 'pending': // Alias for pending
         return {
           glow: 'shadow-[0_0_20px_rgba(245,158,11,0.15)] animate-pulse',
           border: 'border-amber-500/30',
@@ -39,8 +53,8 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTar
         };
       case 'paying':
         return {
-          glow: 'shadow-[0_0_30px_rgba(234,179,8,0.4)] animate-pulse',
-          border: 'border-yellow-500/50',
+          glow: '',
+          border: 'border-yellow-500/50 animate-[pulse-gold_0.8s_ease-in-out_infinite]',
           text: 'text-yellow-500',
         };
       default:
@@ -60,11 +74,11 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTar
       case 'bar':
         return 'w-16 h-28 rounded-xl flex-col';
       case 'round':
-        return 'w-24 h-24 rounded-full flex-col';
+        return 'w-24 h-24 rounded-full flex-col bg-gradient-to-tr from-[#141414] to-[#1c1c1e]';
       case 'bench':
         return 'w-36 h-20 rounded-xl flex-row';
       case 'couch':
-        return 'w-32 h-32 rounded-2xl flex-col';
+        return 'w-32 h-32 rounded-3xl flex-col shadow-[inset_0_4px_20px_rgba(0,0,0,0.5)]';
       case 'square':
       default:
         return 'w-24 h-24 rounded-2xl flex-col';
@@ -75,37 +89,42 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTar
   const isRooftop = zone === 'Rooftop';
 
   const baseClasses = cn(
-    'relative flex items-center justify-center p-3 cursor-pointer transition-colors duration-500',
-    'bg-[#141414]/90 backdrop-blur-xl border',
+    'relative flex items-center justify-center p-3 cursor-pointer transition-all duration-[600ms] ease-out etched-border',
+    'bg-white/[0.03] backdrop-blur-[12px] border border-transparent shadow-[0_0_40px_-10px_rgba(255,255,255,0.03)]',
     getStatusStyles().border,
     getStatusStyles().glow,
     getShapeStyles(),
-    isActive && 'ring-2 ring-white/50 z-50',
+    isActive && 'ring-2 ring-[#e8e6e3]/50 z-50',
+    isWaitlistTarget && 'ring-2 ring-[#e8e6e3] animate-pulse z-40',
     isDragTarget && 'border-dashed border-2 border-[#e8e6e3] scale-105 opacity-80',
-    isOutdoor && 'bg-gradient-to-br from-[#141414] to-[#1a1410]',
+    isOutdoor && 'shadow-[inset_0_0_20px_rgba(245,158,11,0.05),_0_0_20px_rgba(245,158,11,0.1)] border-amber-500/10',
+    justCleared && 'animate-table-clear',
     isRooftop && 'bg-[url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjMiPkNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9InJnYmEoMjU1LDI1NSwyNTUsMC4wNSkiLz48L3N2Zz4=")] bg-repeat'
   );
+
+  const { updateTable } = useFloorPlan();
 
   return (
     <motion.div
       layoutId={`table-${table.id}`}
       drag="x"
       dragConstraints={{ left: 0, right: 0 }}
-      dragElastic={0.1}
+      dragElastic={0.15}
       onDragEnd={(e, info) => {
-        if (info.offset.x > 50) {
-          // A rough simulation of swiping to show/initiate swapping or doing something
-          // or just standard Free drag
+        if (info.offset.x < -60 && status === 'occupied') {
+          // Swipe left to mark paying
+          updateTable(table.id, { status: 'paying' });
         }
       }}
       onClick={(e) => onTap(e, table)}
       className={baseClasses}
       whileHover={{ scale: 1.015 }}
       whileTap={{ scale: 0.97 }}
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: isActive ? 1.04 : 1 }}
+      initial={{ opacity: 0, scale: 0.95, x: -10 }}
+      animate={{ opacity: 1, scale: isActive ? 1.04 : 1, x: 0 }}
       transition={{ 
         opacity: { duration: 0.8, delay: index * 0.05, ease: [0.22, 1, 0.36, 1] },
+        x: { duration: 0.8, delay: index * 0.05, ease: [0.22, 1, 0.36, 1] },
         scale: { duration: 0.8, delay: index * 0.05, type: 'spring', stiffness: 200, damping: 40, mass: 1.5 },
         layout: { type: 'spring', stiffness: 200, damping: 40, mass: 1.5 }
       }}
