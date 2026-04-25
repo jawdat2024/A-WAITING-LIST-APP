@@ -4,13 +4,14 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Clock, Users, MessageCircle, Check, Trash2, Plus, Minus, X, History as HistoryIcon, List, Loader2, CheckCircle2, Map as MapIcon, Maximize2, Minimize2, Lock } from 'lucide-react';
+import { Clock, Users, MessageCircle, Check, Trash2, Plus, Minus, X, History as HistoryIcon, List, Loader2, CheckCircle2, Map as MapIcon, Maximize2, Minimize2, Lock, Sun, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useFloorPlan } from './context/FloorPlanContext';
 import { useKioskAuth } from './components/AuthWrapper';
 import FloorPlanManager from './components/FloorPlanManager';
 import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { db, auth } from './lib/firebase';
+import { db } from './lib/firebase';
+import { cn } from './lib/utils';
 
 interface Customer {
   id: string;
@@ -41,7 +42,7 @@ const TABLE_MAP = {
 };
 
 export default function App() {
-  const { tables, updateTable, resetFloorPlan } = useFloorPlan();
+  const { tables, updateTable, resetFloorPlan, assignTableAtomic } = useFloorPlan();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
 
@@ -71,6 +72,32 @@ export default function App() {
   const [selectedTable, setSelectedTable] = useState('');
   const [showResetModal, setShowResetModal] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showAddGuest, setShowAddGuest] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const saved = localStorage.getItem('theme');
+    if (saved !== null) return saved === 'dark';
+    return true; // default dark
+  });
+  
+  // Kiosk Mode hook
+  const [isKioskMode, setIsKioskMode] = useState(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('kiosk') === 'true') {
+      setIsKioskMode(true);
+      setActiveTab('map');
+    }
+  }, []);
+
+  // Apply dark mode theme
+  useEffect(() => {
+    localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
   
   // Anti-Spam Human Mimicry States (Now localized to customer queue)
   const [globalCooldown, setGlobalCooldown] = useState(0);
@@ -254,9 +281,24 @@ export default function App() {
     // Instantly reserve the table on the floor map
     const tableId = tables.find(t => t.label === selectedTable)?.id;
     if (tableId) {
-      updateTable(tableId, { status: 'reserved', customerName: customerToNotify.name, partySize: customerToNotify.partySize });
+      assignTableAtomic(tableId, { status: 'reserved', currentGuest: {
+        name: customerToNotify.name,
+        partySize: customerToNotify.partySize,
+        seatedAt: Date.now()
+      } }).then((success) => {
+        if (!success) {
+           showToast(`Table ${selectedTable} was just assigned. Please select another.`);
+           return;
+        }
+        updateCustomer(notifyingCustomer, { status: 'NOTIFIED', assignedTable: selectedTable });
+        showToast('Guest Notified & Table Reserved');
+        closeModal();
+      });
+      return; 
     }
     
+    updateCustomer(notifyingCustomer, { status: 'NOTIFIED', assignedTable: selectedTable });
+    showToast('Guest Notified');
     closeModal();
   };
 
@@ -317,7 +359,7 @@ export default function App() {
       if (customer?.assignedTable && customer.status !== 'SEATED') {
         const tableId = tables.find(t => t.label === customer.assignedTable)?.id;
         if (tableId) {
-          updateTable(tableId, { status: 'available', customerName: undefined, partySize: undefined });
+          updateTable(tableId, { status: 'available', currentGuest: undefined, assignedWaiter: undefined });
         }
       }
       removeCustomer(id);
@@ -349,21 +391,48 @@ export default function App() {
   const seatedCustomers = customers.filter((c) => c.status === 'SEATED');
   const isSystemDirty = customers.length > 0 || tables.some(t => t.status !== 'available');
 
+  if (isKioskMode) {
+    return (
+      <div className="absolute inset-0 bg-brand-bg overflow-hidden flex flex-col">
+        <div className="p-4 flex items-center justify-between border-b border-white/10 z-10 bg-black/50 backdrop-blur-md absolute top-0 w-full pointer-events-none">
+          <h1 className="font-cinzel text-xl font-bold tracking-widest text-brand-text">CARTEL KIOSK</h1>
+          <div className="flex items-center gap-4 text-xs font-mono text-brand-accent">
+             <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-brand-accent animate-pulse" /> LIVE SYNC</span>
+          </div>
+        </div>
+        <div className="flex-1 w-full h-full relative z-0">
+          <FloorPlanManager 
+            pendingSeatCustomer={null} 
+            onSeatCompleted={() => {}}
+            onSeatCancel={() => {}}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
-    <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto pb-24 relative overflow-hidden bg-[#0a0a0a]">
+    <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto pb-24 relative overflow-hidden bg-brand-bg transition-colors">
       {/* Toast Notification */}
       <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${toastMessage ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-8 pointer-events-none'}`}>
         <div className="bg-white/10 backdrop-blur-xl border border-white/20 text-brand-text px-6 py-3 rounded-full flex flex-row items-center gap-3 shadow-2xl">
-          <CheckCircle2 size={18} className="text-[#25D366]" />
+          <CheckCircle2 size={18} className="text-[var(--status-available-stroke)]" />
           <span className="font-medium text-sm tracking-wide">{toastMessage}</span>
         </div>
       </div>
 
       <div className="absolute top-4 right-4 z-40 flex items-center gap-2">
         <button
+          onClick={() => setIsDarkMode(!isDarkMode)}
+          className="bg-brand-bg/80 backdrop-blur-md border border-brand-border text-brand-muted hover:text-brand-text px-3 py-1.5 rounded-lg shadow-sm transition-colors flex items-center justify-center"
+          title="Toggle Theme"
+        >
+          {isDarkMode ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
+        <button
           onClick={lockTerminal}
-          className="bg-brand-bg/80 backdrop-blur-md border border-brand-border text-brand-muted hover:text-white px-3 py-1.5 rounded-lg shadow-sm transition-colors flex items-center gap-1.5 text-xs font-medium"
+          className="bg-brand-bg/80 backdrop-blur-md border border-brand-border text-brand-muted hover:text-brand-text px-3 py-1.5 rounded-lg shadow-sm transition-colors flex items-center gap-1.5 text-xs font-medium"
         >
           <Lock size={12} />
           Lock iPad
@@ -392,139 +461,187 @@ export default function App() {
           A NEW FREQUENCY.
         </p>
       </header>
+        {/* Add Guest Floating Button (Mobile) */}
+        {!showAddGuest && (
+          <button
+            onClick={() => setShowAddGuest(true)}
+            className="lg:hidden fixed bottom-24 right-4 z-50 w-14 h-14 bg-brand-text text-brand-bg rounded-full flex items-center justify-center shadow-2xl active:scale-95 transition-transform"
+          >
+            <Plus size={24} />
+          </button>
+        )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Add Form */}
-        <div className="lg:col-span-4">
-          <form onSubmit={handleSubmit} className="bg-brand-card border border-brand-border p-6 rounded-2xl sticky top-8">
-            <h2 className="font-cinzel text-xl font-semibold mb-6 text-brand-text flex items-center gap-2">
-              <Plus size={20} className="text-brand-accent" />
-              Add Guest
-            </h2>
-            
-            {error && (
-              <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm p-3 rounded-lg mb-4">
-                {error}
-              </div>
-            )}
-
-            <div className="space-y-5">
-              <div>
-                <label className="block text-sm text-brand-muted mb-1.5">Name</label>
-                <input 
-                  type="text" 
-                  required 
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Guest Name"
-                  className="w-full bg-brand-bg border border-brand-border rounded-xl px-4 py-3 text-brand-text placeholder:text-brand-muted/50 focus:outline-none focus:border-brand-accent transition-colors" 
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          {/* Left Column: Add Form (Desktop Sidebar / Mobile Bottom Sheet) */}
+          <div className="lg:col-span-4">
+            {/* Modal Backdrop on Mobile */}
+            <AnimatePresence>
+              {showAddGuest && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setShowAddGuest(false)}
+                  className="lg:hidden fixed inset-0 bg-black/60 z-[90] backdrop-blur-sm"
                 />
-              </div>
+              )}
+            </AnimatePresence>
 
-              <div>
-                <label className="block text-sm text-brand-muted mb-1.5">Phone Number</label>
-                <div className="relative">
-                  <span className="absolute left-4 top-3 text-brand-muted select-none">🇦🇪</span>
-                  <input 
-                    type="tel" 
-                    required 
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="05X XXX XXXX" 
-                    className="w-full bg-brand-bg border border-brand-border rounded-xl pl-12 pr-4 py-3 text-brand-text placeholder:text-brand-muted/50 focus:outline-none focus:border-brand-accent transition-colors" 
-                  />
-                </div>
-              </div>
+            {/* Form Container */}
+            <AnimatePresence>
+              {(showAddGuest || window.innerWidth >= 1024) && (
+                <motion.div
+                  initial={{ y: "100%" }}
+                  animate={{ y: 0 }}
+                  exit={{ y: "100%" }}
+                  transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                  className={cn(
+                    "fixed lg:static inset-x-0 bottom-0 z-[100] lg:z-auto bg-brand-card lg:border border-brand-border p-6 rounded-t-3xl lg:rounded-2xl shadow-[0_-20px_40px_rgba(0,0,0,0.2)] lg:shadow-none w-full",
+                    showAddGuest ? "block" : "hidden lg:block", "lg:sticky lg:top-8"
+                  )}
+                >
+                  <div className="w-12 h-1.5 bg-brand-border rounded-full mx-auto mb-6 lg:hidden" />
+                  <form onSubmit={handleSubmit} className="h-full flex flex-col pb-safe">
+                    <div className="flex justify-between items-center mb-6">
+                      <h2 className="font-cinzel text-xl font-semibold text-brand-text flex items-center gap-2">
+                        <Plus size={20} className="text-brand-accent" />
+                        Add Guest
+                      </h2>
+                      <button type="button" onClick={() => setShowAddGuest(false)} className="lg:hidden p-2 bg-brand-bg rounded-full text-brand-muted">
+                        <X size={20} />
+                      </button>
+                    </div>
+                    
+                    {error && (
+                      <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm p-3 rounded-lg mb-4">
+                        {error}
+                      </div>
+                    )}
 
-              <div>
-                <label className="block text-sm text-brand-muted mb-1.5">Party Size</label>
-                <div className="flex items-center justify-between bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-1.5 shadow-inner">
-                  <button
-                    type="button"
-                    onClick={() => setPartySize(Math.max(1, partySize - 1))}
-                    disabled={partySize <= 1}
-                    className="w-12 h-12 flex items-center justify-center rounded-lg bg-black/40 border border-white/5 text-brand-text hover:bg-white/10 active:scale-95 transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed"
-                    aria-label="Decrease party size"
-                  >
-                    <Minus size={20} className="opacity-80" />
-                  </button>
-                  
-                  <div className="font-cinzel text-2xl w-16 text-center text-brand-text font-semibold tracking-wider">
-                    {partySize}
-                  </div>
+                    <div className="space-y-5 overflow-y-auto max-h-[60vh] lg:max-h-none pr-2 custom-scrollbar">
+                      <div>
+                        <label className="block text-sm text-brand-muted mb-1.5">Name</label>
+                        <input 
+                          type="text" 
+                          required 
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                          placeholder="Guest Name"
+                          className="w-full bg-brand-bg border border-brand-border rounded-xl px-4 py-3 text-brand-text placeholder:text-brand-muted/50 focus:outline-none focus:border-brand-accent transition-colors" 
+                        />
+                      </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setPartySize(Math.min(12, partySize + 1))}
-                    disabled={partySize >= 12}
-                    className="w-12 h-12 flex items-center justify-center rounded-lg bg-black/40 border border-white/5 text-brand-text hover:bg-white/10 active:scale-95 transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed"
-                    aria-label="Increase party size"
-                  >
-                    <Plus size={20} className="opacity-80" />
-                  </button>
-                </div>
-              </div>
+                      <div>
+                        <label className="block text-sm text-brand-muted mb-1.5">Phone Number</label>
+                        <div className="relative">
+                          <span className="absolute left-4 top-3 text-brand-muted select-none">🇦🇪</span>
+                          <input 
+                            type="tel" 
+                            required 
+                            value={phone}
+                            onChange={(e) => setPhone(e.target.value)}
+                            placeholder="05X XXX XXXX" 
+                            className="w-full bg-brand-bg border border-brand-border rounded-xl pl-12 pr-4 py-3 text-brand-text placeholder:text-brand-muted/50 focus:outline-none focus:border-brand-accent transition-colors" 
+                          />
+                        </div>
+                      </div>
 
-              <button 
-                type="submit" 
-                className="w-full bg-brand-text text-brand-bg font-semibold py-3.5 rounded-xl mt-2 hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
+                      <div>
+                        <label className="block text-sm text-brand-muted mb-1.5">Party Size</label>
+                        <div className="flex items-center justify-between bg-black/10 backdrop-blur-md border border-brand-border rounded-xl p-1.5 shadow-inner">
+                          <button
+                            type="button"
+                            onClick={() => setPartySize(Math.max(1, partySize - 1))}
+                            disabled={partySize <= 1}
+                            className="w-12 h-12 flex items-center justify-center rounded-lg bg-black/40 border border-brand-border/50 text-brand-text hover:bg-white/10 active:scale-95 transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed touch-manipulation"
+                            aria-label="Decrease party size"
+                          >
+                            <Minus size={20} className="opacity-80" />
+                          </button>
+                          
+                          <div className="font-cinzel text-2xl w-16 text-center text-brand-text font-semibold tracking-wider">
+                            {partySize}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setPartySize(Math.min(12, partySize + 1))}
+                            disabled={partySize >= 12}
+                            className="w-12 h-12 flex items-center justify-center rounded-lg bg-black/40 border border-brand-border/50 text-brand-text hover:bg-white/10 active:scale-95 transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed touch-manipulation"
+                            aria-label="Increase party size"
+                          >
+                            <Plus size={20} className="opacity-80" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <button 
+                        type="submit" 
+                        className="w-full bg-brand-text text-brand-bg font-semibold py-4 rounded-xl mt-4 hover:opacity-90 transition-colors flex items-center justify-center gap-2 touch-manipulation"
+                      >
+                        ADD TO LIST
+                      </button>
+                    </div>
+                  </form>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Right Column: Waiting List & History */}
+          <div className="lg:col-span-8 space-y-6">
+            {/* Tabs (Floating Dock on mobile) */}
+            <div className="fixed bottom-4 left-4 right-4 z-[45] p-2 bg-brand-bg/90 backdrop-blur-xl border border-brand-border rounded-2xl lg:static lg:bg-brand-card lg:p-1 flex gap-2 lg:mb-0 shadow-[0_10px_40px_rgba(0,0,0,0.2)] lg:shadow-none mx-auto max-w-sm lg:max-w-none">
+              <button
+                onClick={() => setActiveTab('waiting')}
+                className={`flex-1 flex flex-col lg:flex-row items-center justify-center gap-1 lg:gap-2 py-2 lg:py-3 rounded-xl font-medium text-[10px] lg:text-sm transition-colors touch-manipulation ${
+                  activeTab === 'waiting' 
+                    ? 'bg-brand-card text-brand-text shadow-sm border border-brand-border' 
+                    : 'text-brand-muted hover:text-brand-text'
+                }`}
               >
-                ADD TO LIST
+                <List size={20} className="lg:w-[18px] lg:h-[18px]" />
+                <span className="flex items-center gap-1">
+                  Wait
+                  <motion.span 
+                    key={`badge-${activeCustomers.length}`}
+                    initial={{ scale: 1.4 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                    className={`px-1.5 py-0.5 rounded-full text-[10px] ${activeTab === 'waiting' ? 'bg-brand-accent/20 text-brand-accent' : 'bg-brand-border text-brand-muted'}`}
+                  >
+                    {activeCustomers.length}
+                  </motion.span>
+                </span>
+              </button>
+              <button
+                onClick={() => setActiveTab('map')}
+                className={`flex-1 flex flex-col lg:flex-row items-center justify-center gap-1 lg:gap-2 py-2 lg:py-3 rounded-xl font-medium text-[10px] lg:text-sm transition-colors touch-manipulation ${
+                  activeTab === 'map' 
+                    ? 'bg-brand-card text-brand-text shadow-sm border border-brand-border' 
+                    : 'text-brand-muted hover:text-brand-text'
+                }`}
+              >
+                <MapIcon size={20} className="lg:w-[18px] lg:h-[18px]" />
+                Map
+              </button>
+              <button
+                onClick={() => setActiveTab('history')}
+                className={`flex-1 flex flex-col lg:flex-row items-center justify-center gap-1 lg:gap-2 py-2 lg:py-3 rounded-xl font-medium text-[10px] lg:text-sm transition-colors touch-manipulation ${
+                  activeTab === 'history' 
+                    ? 'bg-brand-card text-brand-text shadow-sm border border-brand-border' 
+                    : 'text-brand-muted hover:text-brand-text'
+                }`}
+              >
+                <HistoryIcon size={20} className="lg:w-[18px] lg:h-[18px]" />
+                <span className="flex items-center gap-1">
+                  Done
+                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${activeTab === 'history' ? 'bg-brand-accent/20 text-brand-accent' : 'bg-brand-border text-brand-muted'}`}>
+                    {seatedCustomers.length}
+                  </span>
+                </span>
               </button>
             </div>
-          </form>
-        </div>
-
-        {/* Right Column: Waiting List & History */}
-        <div className="lg:col-span-8 space-y-6">
-          {/* Tabs */}
-          <div className="flex gap-2 p-1 bg-brand-card border border-brand-border rounded-xl">
-            <button
-              onClick={() => setActiveTab('waiting')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-medium text-sm transition-colors ${
-                activeTab === 'waiting' 
-                  ? 'bg-brand-bg text-brand-text shadow-sm border border-brand-border' 
-                  : 'text-brand-muted hover:text-brand-text'
-              }`}
-            >
-              <List size={18} />
-              Waiting List
-              <motion.span 
-                key={`badge-${activeCustomers.length}`}
-                initial={{ scale: 1.4 }}
-                animate={{ scale: 1 }}
-                transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-                className={`ml-1 px-2 py-0.5 rounded-full text-xs ${activeTab === 'waiting' ? 'bg-brand-accent/20 text-brand-accent' : 'bg-brand-border text-brand-muted'}`}
-              >
-                {activeCustomers.length}
-              </motion.span>
-            </button>
-            <button
-              onClick={() => setActiveTab('map')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-medium text-sm transition-colors ${
-                activeTab === 'map' 
-                  ? 'bg-brand-bg text-brand-text shadow-sm border border-brand-border' 
-                  : 'text-brand-muted hover:text-brand-text'
-              }`}
-            >
-              <MapIcon size={18} />
-              Floor Map
-            </button>
-            <button
-              onClick={() => setActiveTab('history')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-medium text-sm transition-colors ${
-                activeTab === 'history' 
-                  ? 'bg-brand-bg text-brand-text shadow-sm border border-brand-border' 
-                  : 'text-brand-muted hover:text-brand-text'
-              }`}
-            >
-              <HistoryIcon size={18} />
-              History
-              <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${activeTab === 'history' ? 'bg-brand-accent/20 text-brand-accent' : 'bg-brand-border text-brand-muted'}`}>
-                {seatedCustomers.length}
-              </span>
-            </button>
-          </div>
 
           <AnimatePresence mode="wait">
             {/* Tab Content: Waiting List */}
@@ -535,7 +652,7 @@ export default function App() {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}
                 transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-                className={`transition-all duration-300 relative ${isFullscreen ? 'fixed inset-0 z-[100] bg-[#0a0a0a]/95 backdrop-blur-3xl p-6 md:p-12 overflow-y-auto w-full h-full' : ''}`}
+                className={`transition-all duration-300 relative ${isFullscreen ? 'fixed inset-0 z-[100] bg-brand-bg/95 backdrop-blur-3xl p-6 md:p-12 overflow-y-auto w-full h-full' : ''}`}
               >
               <div className="flex justify-between items-center mb-4">
                 <h2 className={`font-cinzel font-semibold text-brand-text ${isFullscreen ? 'text-3xl' : 'text-xl'}`}>Waiting List</h2>
@@ -824,19 +941,19 @@ export default function App() {
       {/* Reset Floor Plan Confirmation Modal */}
       {showResetModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-3xl flex items-center justify-center z-[110] p-4">
-          <div className="bg-[#1c1c1e]/95 border border-white/20 rounded-3xl p-8 w-full max-w-md shadow-2xl flex flex-col items-center">
+          <div className="bg-[var(--card-bg)]/95 border border-[var(--border-color)] rounded-3xl p-8 w-full max-w-md shadow-2xl flex flex-col items-center">
             <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mb-6 border border-red-500/30">
               <Trash2 size={28} className="text-red-400" />
             </div>
-            <h3 className="font-cinzel text-xl font-bold text-white mb-2 tracking-wide">Clear All History?</h3>
-            <p className="text-sm text-white/60 mb-8 text-center font-sans">
+            <h3 className="font-cinzel text-xl font-bold text-brand-text mb-2 tracking-wide">Clear All History?</h3>
+            <p className="text-sm text-brand-muted mb-8 text-center font-sans">
               This action cannot be undone. All active waiting list entries, seated history, and floor plan statuses will be completely reset.
             </p>
             
             <div className="flex w-full gap-3">
               <button 
                 onClick={() => setShowResetModal(false)}
-                className="flex-1 bg-white/5 border border-white/10 text-white hover:bg-white/10 py-3.5 rounded-xl font-medium transition-colors font-sans"
+                className="flex-1 bg-brand-bg border border-brand-border text-brand-text hover:bg-brand-bg/80 py-3.5 rounded-xl font-medium transition-colors font-sans"
               >
                 Cancel
               </button>

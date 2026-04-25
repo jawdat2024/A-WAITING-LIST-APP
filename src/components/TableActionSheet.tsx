@@ -11,8 +11,9 @@ interface TableActionSheetProps {
 }
 
 export function TableActionSheet({ table, onClose, onInitiateSwap }: TableActionSheetProps) {
-  const { updateTable } = useFloorPlan();
+  const { updateTable, assignTableAtomic } = useFloorPlan();
   const [isAssigning, setIsAssigning] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [guestName, setGuestName] = useState('');
   const [partySize, setPartySize] = useState(2);
 
@@ -22,16 +23,25 @@ export function TableActionSheet({ table, onClose, onInitiateSwap }: TableAction
     e.preventDefault();
     if (!guestName.trim() || partySize <= 0) return;
 
-    updateTable(table.id, { 
+    setIsSyncing(true);
+    assignTableAtomic(table.id, { 
       status: 'occupied', 
       currentGuest: {
         name: guestName.trim(),
         partySize: partySize,
         seatedAt: new Date().toISOString()
       }
+    }).then((success) => {
+      setIsSyncing(false);
+      if (!success) {
+        alert("Table was just occupied by another host. Please select another table.");
+      } else {
+        setIsAssigning(false);
+        onClose();
+      }
+    }).catch(() => {
+      setIsSyncing(false);
     });
-    setIsAssigning(false);
-    onClose();
   };
 
   const elapsedMinutes = table.currentGuest?.seatedAt 
@@ -83,26 +93,26 @@ export function TableActionSheet({ table, onClose, onInitiateSwap }: TableAction
                       value={guestName}
                       onChange={(e) => setGuestName(e.target.value)}
                       autoFocus
-                      className="w-full bg-[#0a0a0a] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white placeholder-white/30 outline-none focus:border-[#4ade80]/50 transition-colors"
+                      className="w-full bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-xl py-3 pl-10 pr-4 text-[var(--text-primary)] placeholder-[var(--text-secondary)]/50 outline-none focus:border-[var(--accent)]/50 transition-colors"
                     />
                   </div>
                   
-                  <div className="flex items-center justify-between bg-[#0a0a0a] border border-white/10 rounded-xl p-2">
-                    <span className="pl-2 text-white/50 text-sm">Party Size</span>
-                    <div className="flex items-center gap-4 text-white">
-                      <button type="button" onClick={() => setPartySize(Math.max(1, partySize - 1))} className="w-10 h-10 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center">-</button>
+                  <div className="flex items-center justify-between bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-xl p-2">
+                    <span className="pl-2 text-[var(--text-secondary)] text-sm">Party Size</span>
+                    <div className="flex items-center gap-4 text-[var(--text-primary)]">
+                      <button type="button" onClick={() => setPartySize(Math.max(1, partySize - 1))} className="w-10 h-10 rounded-lg bg-var(--card-bg)/5 hover:bg-var(--card-bg)/10 flex items-center justify-center border border-[var(--border-color)]">-</button>
                       <span className="w-4 text-center font-mono">{partySize}</span>
-                      <button type="button" onClick={() => setPartySize(partySize + 1)} className="w-10 h-10 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center">+</button>
+                      <button type="button" onClick={() => setPartySize(partySize + 1)} className="w-10 h-10 rounded-lg bg-var(--card-bg)/5 hover:bg-var(--card-bg)/10 flex items-center justify-center border border-[var(--border-color)]">+</button>
                     </div>
                   </div>
                 </div>
                 
                 <div className="flex gap-3 pt-2">
-                  <button type="button" onClick={() => setIsAssigning(false)} className="flex-1 py-3.5 rounded-xl border border-white/10 text-white/70 font-medium hover:bg-white/5 transition-colors">
+                  <button type="button" onClick={() => setIsAssigning(false)} className="flex-1 py-3.5 rounded-xl border border-[var(--border-color)] text-[var(--text-secondary)] font-medium hover:bg-[var(--card-bg)] transition-colors">
                     Cancel
                   </button>
-                  <button type="submit" className="flex-1 py-3.5 rounded-xl bg-[#4ade80] text-black font-semibold tracking-wide hover:bg-[#4ade80]/90 transition-colors flex items-center justify-center gap-2">
-                    <Check size={18} /> Assign Walk-in
+                  <button type="submit" disabled={isSyncing} className={`flex-1 py-3.5 rounded-xl bg-[var(--accent)] text-[var(--bg-primary)] font-semibold tracking-wide transition-colors flex items-center justify-center gap-2 ${isSyncing ? 'opacity-50' : 'hover:opacity-90'}`}>
+                    {isSyncing ? 'Assigning...' : <><Check size={18} /> Assign Walk-in</>}
                   </button>
                 </div>
               </form>
@@ -111,7 +121,7 @@ export function TableActionSheet({ table, onClose, onInitiateSwap }: TableAction
                 
                 {/* Status Specific Metrics */}
                 {table.currentGuest && (
-                  <div className="bg-[#0a0a0a] border border-white/5 rounded-2xl p-5 flex items-center justify-between">
+                  <div className="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-2xl p-5 flex items-center justify-between">
                     <div>
                       <div className="text-white font-medium text-lg mb-1">{table.currentGuest.name}</div>
                       <div className="flex items-center gap-4 text-xs text-white/50 font-mono">

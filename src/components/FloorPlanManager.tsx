@@ -14,12 +14,13 @@ interface FloorPlanManagerProps {
 }
 
 export default function FloorPlanManager({ pendingSeatCustomer, onSeatCompleted, onSeatCancel }: FloorPlanManagerProps) {
-  const { tables, updateTable, swapTables } = useFloorPlan();
+  const { tables, updateTable, swapTables, refreshGrid, assignTableAtomic } = useFloorPlan();
   const [activeTableId, setActiveTableId] = useState<string | null>(null);
   const [swapSourceId, setSwapSourceId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [syncingTableId, setSyncingTableId] = useState<string | null>(null);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -90,17 +91,27 @@ export default function FloorPlanManager({ pendingSeatCustomer, onSeatCompleted,
         return;
       }
       
-      // Auto-seat
-      updateTable(table.id, { 
+      // Auto-seat atomically
+      setSyncingTableId(table.id);
+      assignTableAtomic(table.id, { 
         status: 'occupied', 
         currentGuest: {
           name: pendingSeatCustomer.name,
           partySize: pendingSeatCustomer.partySize,
           seatedAt: Date.now()
         }
+      }).then((success) => {
+        setSyncingTableId(null);
+        if(success) {
+          showToast(`${pendingSeatCustomer.name} seated at ${table.label}`);
+          onSeatCompleted?.(pendingSeatCustomer.id);
+        } else {
+          showToast(`Table ${table.label} was just occupied. Please select another.`);
+        }
+      }).catch(err => {
+         setSyncingTableId(null);
+         showToast(`Error assigning table: ${err.message}`);
       });
-      showToast(`${pendingSeatCustomer.name} seated at ${table.label}`);
-      onSeatCompleted?.(pendingSeatCustomer.id);
       return;
     }
 
@@ -187,33 +198,29 @@ export default function FloorPlanManager({ pendingSeatCustomer, onSeatCompleted,
             exit={{ opacity: 0, transition: { duration: 0.6 } }}
             className="flex-1 flex flex-col items-center justify-center text-center p-8 z-10 relative"
           >
-            {/* The Sonar */}
-            <div className="relative w-48 h-48 flex items-center justify-center mb-12">
-              <div className="absolute inset-0 rounded-full border-[0.5px] border-white blur-[1px] animate-sonar" />
-              <div className="absolute inset-0 rounded-full border-[0.5px] border-white blur-[1px] animate-sonar animate-sonar-delay-1" />
-              <div className="absolute inset-0 rounded-full border-[0.5px] border-white blur-[1px] animate-sonar animate-sonar-delay-2" />
-              {/* Center dot/element */}
-              <div className="w-2 h-2 bg-white/40 rounded-full shadow-[0_0_10px_rgba(255,255,255,0.5)]" />
+            {/* Minimalist Empty State */}
+            <div className="relative w-32 h-32 flex flex-col items-center justify-center mb-12 border border-brand-border rounded-full bg-brand-card shadow-[0_0_50px_rgba(0,0,0,0.1)]">
+               <div className="w-1.5 h-1.5 bg-brand-text rounded-full mb-3" />
+               <div className="w-px h-8 bg-gradient-to-b from-brand-text to-transparent" />
             </div>
 
             {/* The Matrix Reveal Text */}
             <motion.h2 
               initial={{ filter: 'blur(10px)', opacity: 0, y: 10 }}
               animate={{ filter: 'blur(0px)', opacity: 1, y: 0 }}
-              transition={{ duration: 1.2, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
-              className="text-3xl font-light text-[#e8e6e3] uppercase mb-4 font-cinzel"
-              style={{ letterSpacing: '6px' }}
+              transition={{ duration: 1.2, delay: 0.2, ease: [0.4, 0, 0.2, 1] }}
+              className="text-2xl font-semibold text-brand-text uppercase mb-4 font-cinzel tracking-[0.2em]"
             >
               No Tables Configured
             </motion.h2>
 
             <motion.p 
               initial={{ opacity: 0 }}
-              animate={{ opacity: 0.4 }}
+              animate={{ opacity: 1 }}
               transition={{ duration: 1.5, delay: 0.8, ease: "easeInOut" }}
-              className="text-base max-w-md leading-relaxed font-inter text-white"
+              className="text-sm max-w-sm leading-relaxed font-inter text-brand-muted"
             >
-              Please configure the floor map zones in the Admin Settings to initialize the synchronization matrix.
+              Please configure floor map zones to initialize the synchronization matrix.
             </motion.p>
 
             {/* Refresh Grid Button */}
@@ -221,13 +228,11 @@ export default function FloorPlanManager({ pendingSeatCustomer, onSeatCompleted,
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.8, delay: 1.2 }}
-              onClick={() => window.location.reload()} 
-              className="group relative mt-12 px-8 py-3.5 rounded-xl bg-white/[0.03] backdrop-blur-[20px] border border-white/10 text-white transition-all hover:border-white/30 tracking-widest text-xs uppercase flex items-center gap-3 overflow-hidden shadow-[0_0_20px_-10px_rgba(255,255,255,0.1)] hover:shadow-[0_0_30px_-10px_rgba(255,255,255,0.2)]"
+              onClick={refreshGrid} 
+              className="group mt-12 px-8 py-3.5 rounded-full bg-brand-text text-brand-bg transition-transform active:scale-95 hover:opacity-90 tracking-[0.15em] text-xs uppercase flex items-center gap-3 font-semibold shadow-2xl"
             >
-              {/* Shimmer element */}
-              <div className="pointer-events-none absolute inset-0 -translate-x-[200%] w-1/2 bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-[-20deg] transition-all group-hover:animate-[shimmer-sweep_2s_infinite]" />
-              <RotateCcw size={14} className="text-white/50 group-hover:text-white transition-colors" /> 
-              <span>Refresh Grid</span>
+              <RotateCcw size={14} className="group-hover:-rotate-180 transition-transform duration-700" /> 
+              <span>Initialize Matrix</span>
             </motion.button>
           </motion.div>
         ) : (
@@ -244,7 +249,7 @@ export default function FloorPlanManager({ pendingSeatCustomer, onSeatCompleted,
               maxScale={2}
               centerOnInit={true}
               wheel={{ step: 0.01 }}
-              pinch={{ step: 1.0 }}
+              pinch={{ disabled: window.innerWidth < 768 }}
               panning={{ 
                 velocityDisabled: false,
               }}
@@ -252,7 +257,7 @@ export default function FloorPlanManager({ pendingSeatCustomer, onSeatCompleted,
                 animationTime: 1200, 
                 animationType: "easeOut"
               }}
-              doubleClick={{ disabled: true }}
+              doubleClick={{ disabled: false }}
             >
               {({ zoomIn, zoomOut, resetTransform }) => (
                 <>
@@ -285,28 +290,33 @@ export default function FloorPlanManager({ pendingSeatCustomer, onSeatCompleted,
                       return (
                         <motion.div 
                           key={zoneName} 
-                          className="flex flex-col mb-10 border-b border-white/5 pb-10"
+                          className="flex flex-col p-8 mb-12 border-b border-[var(--border-color)]"
                           initial={{ opacity: 0, y: 20 }}
                           animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.8, delay: index * 0.1, ease: [0.22, 1, 0.36, 1] }}
+                          transition={{ duration: 0.8, delay: index * 0.1, ease: [0.4, 0, 0.2, 1] }}
                         >
                           
                           {/* Zone Header */}
-                          <div className="mb-6 font-cinzel text-[10px] uppercase tracking-[0.3em] text-white opacity-40 pl-2">
+                          <div className="mb-6 font-cinzel text-[10px] uppercase tracking-[0.3em] text-[var(--text-secondary)] opacity-60 pl-2">
                             {zoneName}
                           </div>
                           
-                          {/* Horizontal Row or Scrollable Container */}
-                          <div className="flex flex-nowrap md:flex-wrap gap-[20px] items-center overflow-x-auto md:overflow-x-visible pb-4 md:pb-0 px-2 snap-x hide-scrollbar">
+                          {/* Grid Shift for Mobile / Row for Desktop */}
+                          <div className="flex overflow-x-auto snap-x snap-mandatory md:flex-wrap gap-[20px] items-center px-4 md:px-2 pb-4 no-scrollbar -mx-4 md:mx-0">
                             {(zoneTables as TableData[]).map((table, tIndex) => (
-                              <div key={table.id} className="snap-start shrink-0">
+                              <div key={table.id} className="shrink-0 flex justify-center snap-center md:snap-none">
                                 <TableNode 
                                   table={table}
                                   isActive={activeTableId === table.id}
                                   isDragTarget={swapSourceId === table.id}
                                   onTap={handleTableTap}
+                                  onInitiateSwap={(id) => {
+                                    setActiveTableId(null);
+                                    setSwapSourceId(id);
+                                  }}
                                   index={tIndex}
                                   isWaitlistTarget={!!pendingSeatCustomer && table.status === 'available' && table.capacity >= pendingSeatCustomer.partySize}
+                                  isSyncing={table.id === syncingTableId}
                                 />
                               </div>
                             ))}

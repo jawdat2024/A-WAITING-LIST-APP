@@ -7,16 +7,24 @@
       "properties": {
         "id": { "type": "string" },
         "label": { "type": "string" },
-        "x": { "type": "number" },
-        "y": { "type": "number" },
+        "x_pos": { "type": "number" },
+        "y_pos": { "type": "number" },
         "status": { "type": "string", "enum": ["available", "reserved", "occupied", "paid"] },
-        "customerName": { "type": "string" },
-        "partySize": { "type": "number" },
-        "minCapacity": { "type": "number" },
-        "maxCapacity": { "type": "number" },
+        "capacity": { "type": "number" },
+        "currentGuest": { "type": "object" }
+      },
+      "required": ["id", "label", "x_pos", "y_pos", "status"]
+    },
+    "FloorZone": {
+      "title": "FloorZone",
+      "description": "A specific zone in a branch containing multiple tables.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "tables": { "type": "array" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "label", "x", "y", "status", "updatedAt"]
+      "required": ["name", "tables", "updatedAt"]
     },
     "Customer": {
       "title": "Customer",
@@ -39,9 +47,9 @@
     }
   },
   "firestore": {
-    "/tables/{tableId}": {
-      "schema": { "$ref": "#/entities/Table" },
-      "description": "Collection of all tables and their live statuses."
+    "/branches/{branchId}/floor_zones/{zoneId}": {
+      "schema": { "$ref": "#/entities/FloorZone" },
+      "description": "Collection of zones containing table arrays for a given branch."
     },
     "/customers/{customerId}": {
       "schema": { "$ref": "#/entities/Customer" },
