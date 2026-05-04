@@ -1,65 +1,76 @@
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Inter:wght@300;400;500;600&display=swap');
 @import "tailwindcss";
 
 @layer base {
   :root {
-    --bg-primary: #F5F5F0;
-    --bg-secondary: #EBEBEF;
-    --card-bg: #FFFFFF;
-    --text-primary: #1C1917;
-    --text-secondary: #78716C;
-    --accent: #000000;
-    --border-color: rgba(0, 0, 0, 0.1);
-    
-    /* Table Status Colors Light */
-    --status-available-stroke: rgba(101, 163, 13, 0.4);
-    --status-available-fill: rgba(101, 163, 13, 0.05);
-    
-    --status-occupied-stroke: #000000;
-    --status-occupied-fill: #000000;
-    --status-occupied-text: #FFFFFF;
-    
-    --status-reserved-stroke: #FF9500;
-    --status-reserved-fill: rgba(255, 149, 0, 0.05);
-  }
-
-  .dark {
     --bg-primary: #0A0A0A;
     --bg-secondary: #141414;
     --card-bg: rgba(255, 255, 255, 0.03);
-    --text-primary: #E7E5E4;
-    --text-secondary: #A8A29E;
-    --accent: rgba(255, 255, 255, 0.8);
-    --border-color: rgba(255, 255, 255, 0.05);
+    --text-primary: #FAFAFA;
+    --text-secondary: #A1A1AA;
+    --accent: #E4E4E7;
+    --border-color: rgba(255, 255, 255, 0.08);
     
-    /* Table Status Colors Dark */
-    --status-available-stroke: rgba(101, 163, 13, 0.5);
-    --status-available-fill: rgba(101, 163, 13, 0.08);
+    /* Table Status Colors standard POS */
+    /* Available: Green (#10b981) */
+    --status-available-stroke: #10b981;
+    --status-available-glow: rgba(16, 185, 129, 0.15);
     
-    --status-occupied-stroke: #FFFFFF;
-    --status-occupied-fill: #FFFFFF;
-    --status-occupied-text: #000000;
+    /* Occupied: Red (#ef4444) */
+    --status-occupied-stroke: #ef4444;
+    --status-occupied-fill: rgba(239, 68, 68, 0.15);
+    --status-occupied-text: #f87171;
     
-    --status-reserved-stroke: #FF9500;
-    --status-reserved-fill: rgba(255, 149, 0, 0.05);
+    /* Cleaning: Blue (#3b82f6) */
+    --status-cleaning-stroke: #3b82f6;
+    --status-cleaning-glow: rgba(59, 130, 246, 0.2);
+    
+    /* Reserved/Pending: Amber (#f59e0b) */
+    --status-reserved-stroke: #f59e0b;
+  }
+
+  .dark {
+    /* Keep for compatibility if class toggled */
+    --bg-primary: #0A0A0A;
+    --bg-secondary: #141414;
+    --card-bg: rgba(255, 255, 255, 0.03);
+    --text-primary: #FAFAFA;
+    --text-secondary: #A1A1AA;
+    --accent: #E4E4E7;
+    --border-color: rgba(255, 255, 255, 0.08);
+    
+    --status-available-stroke: #10b981;
+    --status-available-glow: rgba(16, 185, 129, 0.15);
+    
+    --status-occupied-stroke: #ef4444;
+    --status-occupied-fill: rgba(239, 68, 68, 0.15);
+    --status-occupied-text: #f87171;
+    
+    --status-cleaning-stroke: #3b82f6;
+    --status-cleaning-glow: rgba(59, 130, 246, 0.2);
+    
+    --status-reserved-stroke: #f59e0b;
+  }
+
+  body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-inter);
+    color-scheme: dark;
   }
 }
 
 @theme {
-  --font-cinzel: "Cinzel", serif;
+  --font-serif: "Playfair Display", serif;
+  --font-cinzel: "Playfair Display", serif;
   --font-inter: "Inter", sans-serif;
   --color-brand-bg: var(--bg-primary);
+  --color-brand-secondary: var(--bg-secondary);
   --color-brand-card: var(--card-bg);
   --color-brand-border: var(--border-color);
   --color-brand-text: var(--text-primary);
   --color-brand-muted: var(--text-secondary);
   --color-brand-accent: var(--accent);
-}
-
-body {
-  background-color: var(--bg-primary);
-  color: var(--text-primary);
-  font-family: var(--font-inter);
 }
 
 @layer utilities {
@@ -71,94 +82,40 @@ body {
     scrollbar-width: none; /* Firefox */
   }
 
-  /* Luxury 'Heavy & Smooth' Fast-path Overrides */
-  .transition-all {
-    transition-property: all;
-    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
-    transition-duration: 500ms !important;
-  }
-  .transition-colors {
-    transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
-    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
-    transition-duration: 500ms !important;
-  }
-  .transition-opacity {
-    transition-property: opacity;
-    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
-    transition-duration: 500ms !important;
-  }
-  .transition-transform {
-    transition-property: transform;
-    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
-    transition-duration: 500ms !important;
-  }
-  .transition {
-    transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;
-    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
-    transition-duration: 500ms !important;
+  .luxury-transition {
+    transition: all 400ms cubic-bezier(0.25, 1, 0.5, 1);
   }
 
-  @keyframes shake-clear {
-    0% { transform: rotate(0deg); }
-    25% { transform: rotate(3deg); }
-    75% { transform: rotate(-3deg); }
-    100% { transform: rotate(0deg); }
+  @keyframes pulse-cleaning {
+    0%, 100% { box-shadow: 0 0 10px var(--status-cleaning-glow); border-color: rgba(255, 255, 255, 0.15); }
+    50% { box-shadow: 0 0 30px var(--status-cleaning-glow); border-color: rgba(255, 255, 255, 0.4); }
   }
   
+  .animate-cleaning {
+    animation: pulse-cleaning 3s ease-in-out infinite;
+  }
+
+  @keyframes table-clear-glow {
+    0% {
+      box-shadow: 0 0 0 rgba(255, 255, 255, 0);
+      transform: scale(1);
+    }
+    50% {
+      box-shadow: 0 0 30px rgba(255, 255, 255, 0.4);
+      transform: scale(1.03);
+    }
+    100% {
+      box-shadow: 0 0 15px rgba(255, 255, 255, 0.08);
+      transform: scale(1);
+    }
+  }
+
+  @keyframes slow-zoom {
+    0% { transform: scale(1); }
+    100% { transform: scale(1.15); }
+  }
+
   .animate-table-clear {
-    animation: shake-clear 0.4s cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  @keyframes pulse-gold {
-    0%, 100% { box-shadow: 0 0 30px rgba(234, 179, 8, 0.4); }
-    50% { box-shadow: 0 0 50px rgba(234, 179, 8, 0.8); border-color: rgba(234, 179, 8, 1); }
-  }
-
-  @keyframes sonar-ripple {
-    0% { transform: scale(0); opacity: 0.6; }
-    100% { transform: scale(1.2); opacity: 0; }
-  }
-  
-  .animate-sonar {
-    animation: sonar-ripple 4s ease-in-out infinite;
-  }
-
-  .animate-sonar-delay-1 {
-    animation-delay: 1.33s;
-  }
-
-  .animate-sonar-delay-2 {
-    animation-delay: 2.66s;
-  }
-
-  @keyframes shimmer-sweep {
-    0% { transform: translateX(-200%) skewX(-20deg); }
-    100% { transform: translateX(200%) skewX(-20deg); }
-  }
-
-  @keyframes breathe-organic {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.02); }
-  }
-  
-  .animate-breathe {
-    animation: breathe-organic 4s ease-in-out infinite;
-  }
-
-  .etched-border {
-    position: relative;
-  }
-  
-  .etched-border::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    padding: 1px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.1) 0%, transparent 100%);
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
+    animation: table-clear-glow 800ms cubic-bezier(0.25, 1, 0.5, 1) forwards;
   }
 }

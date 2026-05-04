@@ -11,12 +11,13 @@ interface TableNodeProps {
   onTap: (e: React.MouseEvent, table: TableData) => void;
   onDragStart?: () => void;
   onInitiateSwap?: (tableId: string) => void;
+  onEditDetails?: (tableId: string) => void;
   index?: number;
   isWaitlistTarget?: boolean;
   isSyncing?: boolean;
 }
 
-export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTarget, onTap, onDragStart, onInitiateSwap, index = 0, isWaitlistTarget, isSyncing }) => {
+export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTarget, onTap, onDragStart, onInitiateSwap, onEditDetails, index = 0, isWaitlistTarget, isSyncing }) => {
   const { status = 'available', shape = 'square', label = '?', capacity = 2, currentGuest, zone = 'Main' } = table;
 
   const [justCleared, setJustCleared] = useState(false);
@@ -63,39 +64,41 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTar
     switch (status) {
       case 'available':
         return {
-          glow: 'shadow-[0_0_25px_rgba(101,163,13,0.25)] animate-breathe',
+          glow: 'shadow-[0_0_15px_var(--status-available-glow)]',
           border: 'border-[var(--status-available-stroke)]',
-          text: 'text-[var(--status-available-stroke)]',
-          fill: 'bg-gradient-to-br from-[var(--status-available-gradient-from)] to-[var(--status-available-gradient-to)]',
+          text: 'text-[#10b981]',
+          fill: 'bg-[var(--status-available-glow)]',
         };
       case 'reserved':
-      case 'pending': // Alias for pending
+      case 'pending':
         return {
-          glow: 'animate-pulse',
-          border: 'border-[var(--status-reserved-stroke)]',
+          glow: '',
+          border: 'border-[var(--status-reserved-stroke)] border-dashed border-[1.5px]',
           text: 'text-[var(--status-reserved-stroke)]',
-          fill: 'bg-[var(--status-reserved-fill)]',
+          fill: 'bg-transparent',
         };
       case 'occupied':
         return {
-          glow: '',
+          glow: 'shadow-[0_0_15px_var(--status-occupied-fill)]',
           border: 'border-[var(--status-occupied-stroke)]',
           text: 'text-[var(--status-occupied-text)]',
           fill: 'bg-[var(--status-occupied-fill)]',
+          opacity: 'opacity-90',
         };
-      case 'paying':
+      case 'cleaning':
+      case 'paying': // Alias paying as cleaning for UI simplicity or keep separate
         return {
-          glow: 'shadow-[0_0_20px_rgba(234,179,8,0.15)] animate-pulse',
-          border: 'border-yellow-500/50',
-          text: 'text-yellow-500',
-          fill: 'bg-yellow-500/5',
+          glow: 'animate-cleaning',
+          border: 'border-[var(--status-cleaning-stroke)]',
+          text: 'text-[var(--status-cleaning-stroke)] relative z-10',
+          fill: 'bg-[var(--status-cleaning-glow)]',
         };
       default:
         return {
           glow: 'shadow-none',
           border: 'border-[var(--border-color)]',
           text: 'text-[var(--text-secondary)]',
-          fill: 'bg-[var(--card-bg)]',
+          fill: 'bg-transparent',
         };
     }
   };
@@ -123,20 +126,39 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTar
   const isRooftop = zone === 'Rooftop';
 
   const baseClasses = cn(
-    'relative flex items-center justify-center p-3 cursor-pointer transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] etched-border',
-    'backdrop-blur-[12px] border',
-    getStatusStyles().border,
-    isActive ? 'bg-[var(--text-primary)]/10 border-[var(--text-primary)] shadow-[0_0_20px_rgba(255,255,255,0.1)]' : getStatusStyles().fill,
-    !isActive && getStatusStyles().glow,
+    'relative flex items-center justify-center p-3 cursor-pointer luxury-transition',
+    'backdrop-blur-sm border hover:shadow-[0_0_20px_rgba(255,255,255,0.05)] hover:scale-[1.02]',
+    statusStyle.border,
+    isActive ? 'bg-white/5 border-white shadow-[0_0_25px_rgba(255,255,255,0.15)]' : statusStyle.fill,
+    !isActive && statusStyle.glow,
+    !isActive && (statusStyle as any).opacity,
     getShapeStyles(),
-    isActive && 'z-50',
+    isActive && 'z-50 scale-105',
     isSyncing && 'animate-pulse opacity-80',
-    isWaitlistTarget && 'ring-2 ring-[var(--status-available-stroke)] animate-pulse z-40',
-    isDragTarget && 'border-dashed border-2 border-[var(--text-primary)] scale-105 opacity-80',
+    isWaitlistTarget && 'ring-1 ring-offset-2 ring-offset-black ring-white animate-pulse z-40',
+    isDragTarget && 'border-dashed border-[1.5px] border-white scale-105 opacity-80',
     justCleared && 'animate-table-clear',
   );
 
   const { updateTable } = useFloorPlan();
+
+  const [timeSeated, setTimeSeated] = useState<string>('');
+
+  useEffect(() => {
+    if (status === 'occupied' && currentGuest?.seatedAt) {
+      const updateTimer = () => {
+        const diffMs = Date.now() - currentGuest.seatedAt!;
+        const mins = Math.floor(diffMs / 60000);
+        if (mins < 60) setTimeSeated(`${mins}m`);
+        else setTimeSeated(`${Math.floor(mins/60)}h ${mins%60}m`);
+      };
+      updateTimer();
+      const interval = setInterval(updateTimer, 60000);
+      return () => clearInterval(interval);
+    } else {
+       setTimeSeated('');
+    }
+  }, [status, currentGuest?.seatedAt]);
 
   return (
     <div className="relative">
@@ -147,8 +169,8 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTar
         dragElastic={0.15}
         onDragEnd={(e, info) => {
           if (info.offset.x < -60 && status === 'occupied') {
-            // Swipe left to mark paying
-            updateTable(table.id, { status: 'paying' });
+            // Swipe left to mark cleaning
+            updateTable(table.id, { status: 'cleaning' });
           }
         }}
         onPointerDown={handlePointerDown}
@@ -159,34 +181,33 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTar
         onPointerLeave={cancelPress}
         onContextMenu={(e) => e.preventDefault()}
         className={baseClasses}
-        whileHover={{ scale: 1.015 }}
-        whileTap={{ scale: 0.97 }}
-        initial={{ opacity: 0, scale: 0.95, x: -10 }}
-        animate={{ opacity: 1, scale: isActive ? 1.04 : 1, x: 0 }}
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+        animate={{ opacity: 1, scale: isActive ? 1.04 : 1, y: 0 }}
         transition={{ 
-          opacity: { duration: 0.8, delay: index * 0.05, ease: [0.22, 1, 0.36, 1] },
-          x: { duration: 0.8, delay: index * 0.05, ease: [0.22, 1, 0.36, 1] },
-          scale: { duration: 0.8, delay: index * 0.05, type: 'spring', stiffness: 200, damping: 40, mass: 1.5 },
-          layout: { type: 'spring', stiffness: 200, damping: 40, mass: 1.5 }
+          opacity: { duration: 0.6, delay: index * 0.03, ease: [0.22, 1, 0.36, 1] },
+          y: { duration: 0.6, delay: index * 0.03, ease: [0.22, 1, 0.36, 1] },
+          scale: { duration: 0.6, type: 'spring', stiffness: 200, damping: 30 }
         }}
       >
         {/* Table Label */}
-      <div className={cn('absolute -top-2 px-1.5 py-0.5 rounded bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[9px] font-medium tracking-[0.2em] uppercase text-[var(--text-primary)] whitespace-nowrap z-10', shape === 'bench' && '-top-2.5')}>
+      <div className={cn('absolute -top-3 px-2 py-0.5 rounded-[4px] bg-[#0A0A0A] border border-[rgba(255,255,255,0.15)] text-[10px] font-medium tracking-[0.15em] uppercase text-[#EAEAEA] whitespace-nowrap z-10 shadow-sm', shape === 'bench' && '-top-3.5')}>
         {label}
       </div>
       
       {/* Centered Content */}
       <AnimatePresence mode="popLayout">
-        {status === 'paying' ? (
+        {status === 'cleaning' || status === 'paying' ? (
           <motion.div
-            key="paying"
+            key="cleaning"
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.8 }}
-            className="flex flex-col items-center justify-center gap-1"
+            className="flex flex-col items-center justify-center gap-1.5"
           >
-            <CreditCard size={20} className="text-yellow-500" />
-            <span className="text-[10px] text-yellow-500 font-medium tracking-wide uppercase">Paying</span>
+            <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+            <span className="text-[9px] text-[var(--text-primary)] font-medium tracking-[0.2em] uppercase opacity-70">Cleaning</span>
           </motion.div>
         ) : currentGuest ? (
           <motion.div
@@ -194,14 +215,19 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTar
             initial={{ opacity: 0, filter: 'blur(4px)' }}
             animate={{ opacity: 1, filter: 'blur(0px)' }}
             exit={{ opacity: 0 }}
-            className={`flex flex-col items-center justify-center ${getStatusStyles().text}`}
+            className={`flex flex-col items-center justify-center ${statusStyle.text}`}
           >
-            <span className="font-medium text-sm truncate max-w-[80px] text-center">
+            <span className="font-serif text-[15px] italic truncate max-w-[80px] text-center opacity-90">
               {currentGuest.name.split(' ')[0]}
             </span>
-            <div className="flex items-center gap-1 mt-1 opacity-60">
-              <Users size={10} className="text-inherit" />
-              <span className="text-[10px] font-mono text-inherit">{currentGuest.partySize}</span>
+            <div className="flex items-center gap-1.5 mt-0.5 opacity-50">
+              <span className="text-[10px] uppercase tracking-[0.2em] font-medium text-inherit">{currentGuest.partySize} PAX</span>
+              {timeSeated && (
+                 <>
+                   <span className="text-[10px]">•</span>
+                   <span className="text-[10px] font-mono tracking-wider">{timeSeated}</span>
+                 </>
+              )}
             </div>
           </motion.div>
         ) : (
@@ -210,10 +236,9 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTar
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex flex-col items-center justify-center opacity-60 group-hover:opacity-100 transition-opacity gap-1"
+            className="flex flex-col items-center justify-center opacity-40 group-hover:opacity-80 transition-opacity gap-1"
           >
-            <Leaf size={14} className="text-[#65a30d]" />
-            <span className="text-[10px] font-mono tracking-widest text-[#65a30d]">CAP {capacity}</span>
+            <span className="text-[9px] font-medium tracking-[0.2em] uppercase text-white">CAP {capacity}</span>
           </motion.div>
         )}
       </AnimatePresence>
@@ -223,9 +248,9 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTar
         <motion.div
            initial={{ scale: 0.8, opacity: 0 }}
            animate={{ scale: 1, opacity: 1 }}
-           className="absolute -top-3 -right-3 w-6 h-6 bg-[var(--text-primary)] rounded-full flex items-center justify-center shadow-lg z-20"
+           className="absolute -top-2 -right-2 w-5 h-5 bg-white rounded-full flex items-center justify-center shadow-[0_0_15px_rgba(255,255,255,0.3)] z-20"
         >
-          <Check size={14} className="text-[var(--bg-primary)] stroke-[3px]" />
+          <Check size={12} className="text-black stroke-[3px]" />
         </motion.div>
       )}
     </motion.div>
@@ -258,7 +283,7 @@ export const TableNode: React.FC<TableNodeProps> = ({ table, isActive, isDragTar
             {/* Edit Guests (Right) */}
             <motion.button
                whileHover={{ scale: 1.1 }}
-               onPointerDown={(e) => { e.stopPropagation(); setShowRadialMenu(false); onTap(e as any, table); }}
+               onPointerDown={(e) => { e.stopPropagation(); setShowRadialMenu(false); onEditDetails?.(table.id); }}
                className="absolute top-1/2 right-0 translate-x-4 -translate-y-1/2 w-12 h-12 rounded-full bg-brand-card border border-brand-border text-brand-text flex flex-col items-center justify-center shadow-xl pointer-events-auto"
             >
               <Edit3 size={16} className="text-brand-accent" />

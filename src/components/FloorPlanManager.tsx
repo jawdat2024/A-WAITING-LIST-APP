@@ -53,6 +53,15 @@ export default function FloorPlanManager({ pendingSeatCustomer, onSeatCompleted,
     return grouped;
   }, [tables]);
 
+  const zoneNames = Object.keys(zones);
+  const [activeZone, setActiveZone] = useState<string>(zoneNames[0] || 'Main');
+
+  useEffect(() => {
+    if (zoneNames.length > 0 && !zoneNames.includes(activeZone)) {
+      setActiveZone(zoneNames[0]);
+    }
+  }, [zoneNames, activeZone]);
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
@@ -120,15 +129,93 @@ export default function FloorPlanManager({ pendingSeatCustomer, onSeatCompleted,
          setSwapSourceId(null);
          return;
       }
-      // Usually can swap occupied tables with each other or with available tables
       swapTables(swapSourceId, table.id);
       setSwapSourceId(null);
       showToast(`Tables swapped.`);
       return;
     }
     
-    setActiveTableId(table.id);
+    // Pro Developer Spec: One-Tap Waiter Flow
+    // Fast optimistic toggle between available <-> occupied
+    const newStatus = table.status === 'available' ? 'occupied' : 'available';
+    setSyncingTableId(table.id);
+    updateTable(table.id, { 
+      status: newStatus,
+      // Default to walk-in when quickly occupied by tap
+      currentGuest: newStatus === 'available' ? undefined : { name: 'Walk-in', partySize: table.capacity, seatedAt: Date.now() }
+    });
+    
+    // Slight debounce on the sync spinner for visual feedback
+    setTimeout(() => setSyncingTableId(null), 300);
   };
+
+  const isMobile = window.innerWidth < 768;
+
+  const mapContent = (
+    <div className={cn(
+      "w-full flex-1 flex flex-col pointer-events-auto",
+      isMobile ? "pb-24 touch-pan-y" : "min-w-[1240px] p-6 md:p-12 items-center justify-center content-center"
+    )}>
+      <AnimatePresence mode="wait">
+        {zones[activeZone] && (
+          <motion.div 
+            key={activeZone} 
+            className="flex flex-col relative flex-1 w-full"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.3 }}
+          >
+            <div className={cn(
+              isMobile 
+                ? "flex flex-wrap content-start gap-4 pb-4 w-full justify-center" 
+                : "grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-8 items-start pb-4 justify-center"
+            )}>
+              {zones[activeZone].map((table, tIndex) => (
+                <div key={table.id} className="shrink-0 flex justify-center">
+                  <TableNode 
+                    table={table}
+                    isActive={activeTableId === table.id}
+                    isDragTarget={swapSourceId === table.id}
+                    onTap={handleTableTap}
+                    onInitiateSwap={(id) => {
+                      setActiveTableId(null);
+                      setSwapSourceId(id);
+                    }}
+                    onEditDetails={(id) => {
+                      setActiveTableId(id);
+                    }}
+                    index={tIndex}
+                    isWaitlistTarget={!!pendingSeatCustomer && table.status === 'available' && table.capacity >= pendingSeatCustomer.partySize}
+                    isSyncing={table.id === syncingTableId}
+                  />
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+
+  const floorTabs = zoneNames.length > 1 ? (
+    <div className="absolute top-4 inset-x-0 z-50 flex justify-center gap-2 pointer-events-auto">
+      <div className="bg-[#141414]/90 backdrop-blur-xl border border-white/10 px-2 py-1.5 rounded-full flex gap-1 shadow-2xl">
+        {zoneNames.map(z => (
+          <button
+            key={z}
+            onClick={(e) => { e.stopPropagation(); setActiveZone(z); }}
+            className={cn(
+              "px-5 py-2 rounded-full text-[11px] font-semibold tracking-wider uppercase transition-all duration-300",
+              activeZone === z ? "bg-white text-black shadow-md scale-100" : "bg-transparent text-white/50 hover:text-white hover:bg-white/5 scale-95 hover:scale-100"
+            )}
+          >
+            {z}
+          </button>
+        ))}
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div 
@@ -241,97 +328,55 @@ export default function FloorPlanManager({ pendingSeatCustomer, onSeatCompleted,
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1], delay: 0.1 }}
-            className="flex-1 w-full flex flex-col"
+            className="flex-1 w-full flex flex-col relative"
           >
-            <TransformWrapper
-              initialScale={1}
-              minScale={0.4}
-              maxScale={2}
-              centerOnInit={true}
-              wheel={{ step: 0.01 }}
-              pinch={{ disabled: window.innerWidth < 768 }}
-              panning={{ 
-                velocityDisabled: false,
-              }}
-              velocityAnimation={{
-                animationTime: 1200, 
-                animationType: "easeOut"
-              }}
-              doubleClick={{ disabled: false }}
-            >
-              {({ zoomIn, zoomOut, resetTransform }) => (
-                <>
-                  {/* Floating Map Controls */}
-              <div className="absolute bottom-6 right-6 z-40 flex flex-col gap-2">
-                <button onClick={toggleFullscreen} className="w-10 h-10 rounded-full bg-[#141414]/80 backdrop-blur-md border border-white/10 text-white/60 hover:text-white flex items-center justify-center transition-colors shadow-lg">
-                  {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-                </button>
-                <div className="w-10 h-[1px] bg-white/10 my-1" />
-                <button onClick={() => zoomIn()} className="w-10 h-10 rounded-full bg-[#141414]/80 backdrop-blur-md border border-white/10 text-white/60 hover:text-white flex items-center justify-center transition-colors shadow-lg">
-                  <ZoomIn size={18} />
-                </button>
-                <button onClick={() => zoomOut()} className="w-10 h-10 rounded-full bg-[#141414]/80 backdrop-blur-md border border-white/10 text-white/60 hover:text-white flex items-center justify-center transition-colors shadow-lg">
-                  <ZoomOut size={18} />
-                </button>
-                <button onClick={() => resetTransform()} className="w-10 h-10 rounded-full bg-[#141414]/80 backdrop-blur-md border border-white/10 text-white/60 hover:text-white flex items-center justify-center transition-colors shadow-lg">
-                  <RotateCcw size={18} />
-                </button>
+            {floorTabs}
+            {isMobile ? (
+              <div className="pt-20 flex-1">
+                {mapContent}
               </div>
+            ) : (
+              <TransformWrapper
+                initialScale={1}
+                minScale={0.4}
+                maxScale={2}
+                centerOnInit={true}
+                wheel={{ step: 0.01 }}
+                pinch={{ disabled: window.innerWidth < 768 }}
+                panning={{ velocityDisabled: false }}
+                velocityAnimation={{ animationTime: 1200, animationType: "easeOut" }}
+                doubleClick={{ disabled: false }}
+              >
+                {({ zoomIn, zoomOut, resetTransform }) => (
+                  <>
+                    {/* Floating Map Controls */}
+                    <div className="absolute bottom-6 right-6 z-40 flex flex-col gap-2">
+                      <button onClick={toggleFullscreen} className="w-10 h-10 rounded-full bg-[#141414]/80 backdrop-blur-md border border-white/10 text-white/60 hover:text-white flex items-center justify-center transition-colors shadow-lg">
+                        {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                      </button>
+                      <div className="w-10 h-[1px] bg-white/10 my-1" />
+                      <button onClick={() => zoomIn()} className="w-10 h-10 rounded-full bg-[#141414]/80 backdrop-blur-md border border-white/10 text-white/60 hover:text-white flex items-center justify-center transition-colors shadow-lg">
+                        <ZoomIn size={18} />
+                      </button>
+                      <button onClick={() => zoomOut()} className="w-10 h-10 rounded-full bg-[#141414]/80 backdrop-blur-md border border-white/10 text-white/60 hover:text-white flex items-center justify-center transition-colors shadow-lg">
+                        <ZoomOut size={18} />
+                      </button>
+                      <button onClick={() => resetTransform()} className="w-10 h-10 rounded-full bg-[#141414]/80 backdrop-blur-md border border-white/10 text-white/60 hover:text-white flex items-center justify-center transition-colors shadow-lg">
+                        <RotateCcw size={18} />
+                      </button>
+                    </div>
 
-              {/* The Map Canvas */}
-              <div className="w-full h-full flex-1 touch-none">
-                <TransformComponent wrapperClass="!w-full !h-full" contentClass="!w-full !h-full min-w-full md:min-w-[1240px] p-6 md:p-24">
-                  <div className="w-full h-full flex flex-col pt-8">
-                    
-                    {/* Zone Sections based on Horizontal Rows */}
-                    {Object.entries(zones).map(([zoneName, zoneTables], index) => {
-                      if (!zoneTables || (zoneTables as TableData[]).length === 0) return null;
-
-                      return (
-                        <motion.div 
-                          key={zoneName} 
-                          className="flex flex-col p-8 mb-12 border-b border-[var(--border-color)]"
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.8, delay: index * 0.1, ease: [0.4, 0, 0.2, 1] }}
-                        >
-                          
-                          {/* Zone Header */}
-                          <div className="mb-6 font-cinzel text-[10px] uppercase tracking-[0.3em] text-[var(--text-secondary)] opacity-60 pl-2">
-                            {zoneName}
-                          </div>
-                          
-                          {/* Grid Shift for Mobile / Row for Desktop */}
-                          <div className="flex overflow-x-auto snap-x snap-mandatory md:flex-wrap gap-[20px] items-center px-4 md:px-2 pb-4 no-scrollbar -mx-4 md:mx-0">
-                            {(zoneTables as TableData[]).map((table, tIndex) => (
-                              <div key={table.id} className="shrink-0 flex justify-center snap-center md:snap-none">
-                                <TableNode 
-                                  table={table}
-                                  isActive={activeTableId === table.id}
-                                  isDragTarget={swapSourceId === table.id}
-                                  onTap={handleTableTap}
-                                  onInitiateSwap={(id) => {
-                                    setActiveTableId(null);
-                                    setSwapSourceId(id);
-                                  }}
-                                  index={tIndex}
-                                  isWaitlistTarget={!!pendingSeatCustomer && table.status === 'available' && table.capacity >= pendingSeatCustomer.partySize}
-                                  isSyncing={table.id === syncingTableId}
-                                />
-                              </div>
-                            ))}
-                          </div>
-                        </motion.div>
-                      );
-                    })}
-
-                  </div>
-                </TransformComponent>
-              </div>
-            </>
-          )}
-        </TransformWrapper>
-        </motion.div>
+                    {/* The Map Canvas */}
+                    <div className="w-full h-full flex-1 touch-none">
+                      <TransformComponent wrapperClass="!w-full !h-full" contentClass="!w-full !h-full min-w-full md:min-w-[1240px] p-6 md:p-24">
+                        {mapContent}
+                      </TransformComponent>
+                    </div>
+                  </>
+                )}
+              </TransformWrapper>
+            )}
+          </motion.div>
       )}
       </AnimatePresence>
 

@@ -255,6 +255,17 @@ export const FloorPlanProvider = ({ children }: { children: ReactNode }) => {
           lastUpdated: serverTimestamp(),
           updatedBy: getDeviceId()
         });
+
+        // 5. Write to /activityLogs for audit trail
+        const logRef = doc(collection(db, `branches/${DEFAULT_BRANCH_ID}/activityLogs`));
+        transaction.set(logRef, {
+          action: 'SEAT_GUEST',
+          tableId: id,
+          guestName: updates.currentGuest?.name || 'Walk-in',
+          partySize: updates.currentGuest?.partySize || 0,
+          timestamp: serverTimestamp(),
+          deviceId: getDeviceId()
+        });
       });
 
       return true;
@@ -358,7 +369,7 @@ export const FloorPlanProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <FloorPlanContext.Provider value={{ tables, updateTable, swapTables, resetFloorPlan, refreshGrid }}>
+    <FloorPlanContext.Provider value={{ tables, updateTable, swapTables, resetFloorPlan, refreshGrid, assignTableAtomic }}>
       {children}
     </FloorPlanContext.Provider>
   );

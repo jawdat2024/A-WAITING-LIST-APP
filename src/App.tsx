@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useFloorPlan } from './context/FloorPlanContext';
 import { useKioskAuth } from './components/AuthWrapper';
 import FloorPlanManager from './components/FloorPlanManager';
+import VirtualWaitingRoom from './components/VirtualWaitingRoom';
 import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { cn } from './lib/utils';
@@ -20,15 +21,70 @@ interface Customer {
   originalPhone: string; // As entered 05...
   partySize: number;
   addedAt: number;
-  status: 'WAITING' | 'NOTIFIED' | 'SEATED';
+  status: 'WAITING' | 'NOTIFIED' | 'REMINDED' | 'SEATED' | 'EXPIRED' | 'NO-SHOW';
   assignedTable?: string;
   seatedAt?: number;
   syncStatus?: 'syncing' | 'confirmed';
+  
+  // Meta WhatsApp & Grace Period tracking
+  notifiedAt?: number;
+  gracePeriodEndsAt?: number;
+  reminderSentAt?: number;
+  whatsappLog?: {
+    messageId: string;
+    templateName: string;
+    sentAt: number;
+    deliveredAt?: number;
+    readAt?: number;
+    failedAt?: number;
+    errorReason?: string;
+  }[];
 }
 
 interface QueueState {
   timeLeft: number;
   status: 'counting' | 'ready';
+}
+
+type MatchType = 'perfect' | 'ideal' | 'spacious' | 'tight';
+
+interface TableMatch {
+  id: string;
+  label: string;
+  capacity: number;
+  zone?: string;
+  status: string;
+  fitScore: number;
+  matchType: MatchType;
+}
+
+function calculateFit(party: number, capacity: number): number {
+  if (capacity === party) return 100;        // Perfect fit
+  if (capacity === party + 1) return 90;     // One extra seat (ideal for comfort)
+  if (capacity === party + 2) return 75;     // Slightly roomy
+  if (capacity > party + 2) return 50;       // Too big, waste of space
+  if (capacity < party) return 0;            // Doesn't fit
+  return 0;
+}
+
+function getMatchType(party: number, capacity: number): MatchType {
+  if (capacity === party) return 'perfect';
+  if (capacity === party + 1) return 'ideal';
+  if (capacity > party) return 'spacious';
+  return 'tight';
+}
+
+function findBestTables(partySize: number, availableTables: any[]): TableMatch[] {
+  return availableTables
+    .filter(t => t.status === 'available')
+    .map(t => ({
+      ...t,
+      fitScore: calculateFit(partySize, t.capacity),
+      matchType: getMatchType(partySize, t.capacity)
+    }))
+    .filter(t => t.fitScore > 0)
+    .sort((a, b) => b.fitScore - a.fitScore)
+    .slice(0, 5); // Top 5 suggestions
 }
 
 const TABLE_MAP = {
@@ -79,13 +135,18 @@ export default function App() {
     return true; // default dark
   });
   
-  // Kiosk Mode hook
   const [isKioskMode, setIsKioskMode] = useState(false);
+  const [isGuestMode, setIsGuestMode] = useState(false);
+  
+  // Theme and Modes hook
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('kiosk') === 'true') {
       setIsKioskMode(true);
       setActiveTab('map');
+    }
+    if (params.get('guest') === 'true') {
+      setIsGuestMode(true);
     }
   }, []);
 
@@ -290,14 +351,14 @@ export default function App() {
            showToast(`Table ${selectedTable} was just assigned. Please select another.`);
            return;
         }
-        updateCustomer(notifyingCustomer, { status: 'NOTIFIED', assignedTable: selectedTable });
+        updateCustomer(customerToNotify.id, { status: 'NOTIFIED', assignedTable: selectedTable });
         showToast('Guest Notified & Table Reserved');
         closeModal();
       });
       return; 
     }
     
-    updateCustomer(notifyingCustomer, { status: 'NOTIFIED', assignedTable: selectedTable });
+    updateCustomer(customerToNotify.id, { status: 'NOTIFIED', assignedTable: selectedTable });
     showToast('Guest Notified');
     closeModal();
   };
@@ -390,6 +451,12 @@ export default function App() {
   const activeCustomers = customers.filter((c) => c.status !== 'SEATED');
   const seatedCustomers = customers.filter((c) => c.status === 'SEATED');
   const isSystemDirty = customers.length > 0 || tables.some(t => t.status !== 'available');
+  
+  const bestTables = findBestTables(partySize, tables);
+
+  if (isGuestMode) {
+    return <VirtualWaitingRoom />;
+  }
 
   if (isKioskMode) {
     return (
@@ -423,6 +490,14 @@ export default function App() {
       </div>
 
       <div className="absolute top-4 right-4 z-40 flex items-center gap-2">
+        <a
+          href="/?guest=true"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="bg-brand-bg/80 backdrop-blur-md border border-brand-border text-brand-muted hover:text-white px-3 py-1.5 rounded-lg shadow-sm transition-colors flex items-center justify-center text-xs font-medium"
+        >
+          Guest View
+        </a>
         <button
           onClick={() => setIsDarkMode(!isDarkMode)}
           className="bg-brand-bg/80 backdrop-blur-md border border-brand-border text-brand-muted hover:text-brand-text px-3 py-1.5 rounded-lg shadow-sm transition-colors flex items-center justify-center"
@@ -448,17 +523,11 @@ export default function App() {
 
       {/* Header */}
       <header className="flex flex-col items-center justify-center mb-12 mt-4">
-        <img 
-          src="https://tse3.mm.bing.net/th/id/OIP.5qWSQBwWhh5pE5_5ZxeLFwAAAA?rs=1&pid=ImgDetMain&o=7&rm=3" 
-          alt="Cartel Coffee Logo" 
-          className="w-24 h-24 object-contain mb-4 filter invert opacity-90"
-          referrerPolicy="no-referrer"
-        />
-        <h1 className="font-cinzel text-4xl md:text-5xl font-bold tracking-widest text-brand-text text-center">
-          CARTEL
+        <h1 className="font-serif text-3xl md:text-4xl italic tracking-wide text-white text-center opacity-90">
+          Cartel Coffee Roasters
         </h1>
-        <p className="font-inter tracking-[0.3em] text-brand-muted text-sm mt-2 uppercase">
-          A NEW FREQUENCY.
+        <p className="font-inter tracking-[0.2em] text-white/40 text-[10px] mt-4 uppercase">
+          Table Management
         </p>
       </header>
         {/* Add Guest Floating Button (Mobile) */}
@@ -575,6 +644,37 @@ export default function App() {
                         </div>
                       </div>
 
+                      {/* Smart Capacity Match visualizer */}
+                      {bestTables.length > 0 && (
+                        <div className="mt-4 pt-4 border-t border-brand-border">
+                          <label className="flex items-center justify-between text-xs font-semibold uppercase tracking-widest text-brand-muted mb-3">
+                            <span>Smart Matches</span>
+                            <span className="bg-brand-accent/20 text-brand-accent px-2 py-0.5 rounded text-[10px] flex items-center gap-1">
+                              <MapIcon size={10} /> Auto-suggest
+                            </span>
+                          </label>
+                          <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar hide-scrollbar snap-x">
+                            {bestTables.map((table) => {
+                              const getBadgeColor = (type: MatchType) => {
+                                switch (type) {
+                                  case 'perfect': return 'text-white bg-white/10 border-white/20';
+                                  case 'ideal': return 'text-white/80 bg-white/5 border-white/10';
+                                  case 'spacious': return 'text-white/60 bg-transparent border-white/5';
+                                  case 'tight': return 'text-white/40 bg-transparent border-white/5 border-dashed';
+                                  default: return 'text-white/30 bg-transparent border-white/5';
+                                }
+                              };
+                              return (
+                                <div key={table.id} className={cn("shrink-0 snap-center rounded-lg border p-2 min-w-[90px] flex flex-col items-center justify-center gap-1.5 transition-colors", getBadgeColor(table.matchType))}>
+                                  <span className="font-cinzel font-bold text-lg">{table.label}</span>
+                                  <span className="text-[10px] uppercase font-medium tracking-wide opacity-80">{table.matchType}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
                       <button 
                         type="submit" 
                         className="w-full bg-brand-text text-brand-bg font-semibold py-4 rounded-xl mt-4 hover:opacity-90 transition-colors flex items-center justify-center gap-2 touch-manipulation"
@@ -590,57 +690,45 @@ export default function App() {
 
           {/* Right Column: Waiting List & History */}
           <div className="lg:col-span-8 space-y-6">
-            {/* Tabs (Floating Dock on mobile) */}
-            <div className="fixed bottom-4 left-4 right-4 z-[45] p-2 bg-brand-bg/90 backdrop-blur-xl border border-brand-border rounded-2xl lg:static lg:bg-brand-card lg:p-1 flex gap-2 lg:mb-0 shadow-[0_10px_40px_rgba(0,0,0,0.2)] lg:shadow-none mx-auto max-w-sm lg:max-w-none">
-              <button
-                onClick={() => setActiveTab('waiting')}
-                className={`flex-1 flex flex-col lg:flex-row items-center justify-center gap-1 lg:gap-2 py-2 lg:py-3 rounded-xl font-medium text-[10px] lg:text-sm transition-colors touch-manipulation ${
-                  activeTab === 'waiting' 
-                    ? 'bg-brand-card text-brand-text shadow-sm border border-brand-border' 
-                    : 'text-brand-muted hover:text-brand-text'
-                }`}
-              >
-                <List size={20} className="lg:w-[18px] lg:h-[18px]" />
-                <span className="flex items-center gap-1">
-                  Wait
-                  <motion.span 
-                    key={`badge-${activeCustomers.length}`}
-                    initial={{ scale: 1.4 }}
-                    animate={{ scale: 1 }}
-                    transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-                    className={`px-1.5 py-0.5 rounded-full text-[10px] ${activeTab === 'waiting' ? 'bg-brand-accent/20 text-brand-accent' : 'bg-brand-border text-brand-muted'}`}
-                  >
-                    {activeCustomers.length}
-                  </motion.span>
-                </span>
-              </button>
-              <button
-                onClick={() => setActiveTab('map')}
-                className={`flex-1 flex flex-col lg:flex-row items-center justify-center gap-1 lg:gap-2 py-2 lg:py-3 rounded-xl font-medium text-[10px] lg:text-sm transition-colors touch-manipulation ${
-                  activeTab === 'map' 
-                    ? 'bg-brand-card text-brand-text shadow-sm border border-brand-border' 
-                    : 'text-brand-muted hover:text-brand-text'
-                }`}
-              >
-                <MapIcon size={20} className="lg:w-[18px] lg:h-[18px]" />
-                Map
-              </button>
-              <button
-                onClick={() => setActiveTab('history')}
-                className={`flex-1 flex flex-col lg:flex-row items-center justify-center gap-1 lg:gap-2 py-2 lg:py-3 rounded-xl font-medium text-[10px] lg:text-sm transition-colors touch-manipulation ${
-                  activeTab === 'history' 
-                    ? 'bg-brand-card text-brand-text shadow-sm border border-brand-border' 
-                    : 'text-brand-muted hover:text-brand-text'
-                }`}
-              >
-                <HistoryIcon size={20} className="lg:w-[18px] lg:h-[18px]" />
-                <span className="flex items-center gap-1">
+            {/* Tabs (Floating dock style) */}
+            <div className="fixed bottom-4 left-4 right-4 z-[45] p-1.5 bg-[#0a0a0a]/80 backdrop-blur-xl border border-white/10 rounded-full lg:static lg:bg-transparent lg:p-0 flex gap-2 lg:mb-0 lg:border-none shadow-[0_10px_40px_rgba(0,0,0,0.5)] lg:shadow-none mx-auto max-w-[320px] lg:max-w-none justify-center">
+              <div className="flex bg-white/5 border border-white/10 p-1 rounded-full w-full lg:w-fit">
+                <button
+                  onClick={() => setActiveTab('waiting')}
+                  className={`flex-1 lg:flex-none px-6 py-2 rounded-full font-medium text-[11px] uppercase tracking-[0.1em] transition-all touch-manipulation flex items-center justify-center gap-2 ${
+                    activeTab === 'waiting' 
+                      ? 'bg-white text-black shadow-sm' 
+                      : 'text-white/50 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <List size={14} className={activeTab === 'waiting' ? 'text-black' : 'text-white/50'} />
+                  Queue
+                  {activeCustomers.length > 0 && <span className="opacity-60">{activeCustomers.length}</span>}
+                </button>
+                <button
+                  onClick={() => setActiveTab('map')}
+                  className={`flex-1 lg:flex-none px-6 py-2 rounded-full font-medium text-[11px] uppercase tracking-[0.1em] transition-all touch-manipulation flex items-center justify-center gap-2 ${
+                    activeTab === 'map' 
+                      ? 'bg-white text-black shadow-sm' 
+                      : 'text-white/50 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <MapIcon size={14} className={activeTab === 'map' ? 'text-black' : 'text-white/50'} />
+                  Map
+                </button>
+                <button
+                  onClick={() => setActiveTab('history')}
+                  className={`flex-1 lg:flex-none px-6 py-2 rounded-full font-medium text-[11px] uppercase tracking-[0.1em] transition-all touch-manipulation flex items-center justify-center gap-2 ${
+                    activeTab === 'history' 
+                      ? 'bg-white text-black shadow-sm' 
+                      : 'text-white/50 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <HistoryIcon size={14} className={activeTab === 'history' ? 'text-black' : 'text-white/50'} />
                   Done
-                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${activeTab === 'history' ? 'bg-brand-accent/20 text-brand-accent' : 'bg-brand-border text-brand-muted'}`}>
-                    {seatedCustomers.length}
-                  </span>
-                </span>
-              </button>
+                  {seatedCustomers.length > 0 && <span className="opacity-60">{seatedCustomers.length}</span>}
+                </button>
+              </div>
             </div>
 
           <AnimatePresence mode="wait">
@@ -675,46 +763,98 @@ export default function App() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {activeCustomers.map((customer, index) => (
+                  {activeCustomers.map((customer, index) => {
+                    const waitMins = Math.floor((now - customer.addedAt) / 60000);
+                    const isUrgent = waitMins >= 25;
+                    const isWarning = waitMins >= 15 && waitMins < 25;
+                    const borderClass = isUrgent 
+                      ? 'border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.15)] bg-red-500/5' 
+                      : isWarning 
+                        ? 'border-amber-500/50 bg-amber-500/5' 
+                        : 'border-brand-border bg-brand-card hover:border-brand-border/80';
+                    const timeColor = isUrgent ? 'text-red-400 font-bold' : isWarning ? 'text-amber-500' : 'text-brand-accent';
+                    const custBestTables = findBestTables(customer.partySize, tables);
+                    
+                    return (
                     <div 
                       key={customer.id} 
-                      className="bg-brand-card border border-brand-border p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-brand-border/80 transition-colors"
+                      className={cn("p-4 sm:p-5 rounded-2xl flex flex-col gap-4 transition-all relative overflow-hidden group border", borderClass)}
                     >
-                      <div className="flex items-start gap-4 sm:gap-6">
-                        <div className="font-cinzel text-3xl text-brand-muted/40 font-bold w-10 pt-1">
-                          #{index + 1}
-                        </div>
-                        <div>
-                          <h3 className="font-semibold text-lg text-brand-text flex items-center gap-2">
-                            {customer.name}
-                            {customer.syncStatus === 'syncing' ? (
-                              <Loader2 size={16} className="text-brand-muted animate-spin" />
-                            ) : customer.syncStatus === 'confirmed' ? (
-                              <CheckCircle2 size={16} className="text-[#25D366]/70" />
-                            ) : null}
-                            {customer.assignedTable && (
-                              <span className="text-xs font-normal bg-brand-accent/10 text-brand-accent border border-brand-accent/20 px-2 py-0.5 rounded">
-                                {customer.assignedTable}
+                      {isUrgent && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-red-500" />}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="flex items-start gap-4 sm:gap-6 w-full">
+                          <div className={cn("font-cinzel text-3xl font-bold w-10 pt-1 transition-colors", isUrgent ? "text-red-500/40" : isWarning ? "text-amber-500/40" : "text-brand-muted/40")}>
+                            #{index + 1}
+                          </div>
+                          <div className="flex-1">
+                            <h3 className="font-semibold text-lg text-brand-text flex items-center gap-2">
+                              {customer.name}
+                              {customer.syncStatus === 'syncing' ? (
+                                <Loader2 size={16} className="text-brand-muted animate-spin" />
+                              ) : customer.syncStatus === 'confirmed' ? (
+                                <CheckCircle2 size={16} className="text-[#25D366]/70" />
+                              ) : null}
+                              {customer.assignedTable && (
+                                <span className={cn("text-xs font-normal border px-2 py-0.5 rounded", isUrgent ? "bg-red-500/10 text-red-400 border-red-500/20" : "bg-brand-accent/10 text-brand-accent border-brand-accent/20")}>
+                                  {customer.assignedTable}
+                                </span>
+                              )}
+                            </h3>
+                            <div className="text-brand-muted text-sm flex flex-wrap items-center gap-x-4 gap-y-2 mt-1.5">
+                              <span className="font-mono text-xs bg-brand-bg px-2 py-0.5 rounded border border-brand-border">
+                                {maskPhone(customer.originalPhone)}
                               </span>
+                              <span className="flex items-center gap-1.5">
+                                <Users size={14} className={isUrgent ? 'text-red-400' : isWarning ? 'text-amber-500' : 'text-brand-accent'} /> 
+                                {customer.partySize} {customer.partySize === 1 ? 'person' : 'persons'}
+                              </span>
+                              <span className={cn("flex items-center gap-1.5", timeColor)}>
+                                <Clock size={14} /> 
+                                {getWaitTime(customer.addedAt)}
+                              </span>
+                            </div>
+
+                            {/* Smart Auto-Suggest inside Waitlist item */}
+                            {!customer.assignedTable && custBestTables.length > 0 && (
+                              <div className="mt-4 pt-3 border-t border-brand-border/30 w-full">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <MapIcon size={12} className="text-brand-muted" />
+                                  <span className="text-[10px] uppercase font-bold tracking-wider text-brand-muted">Suggested Tables</span>
+                                </div>
+                                <div className="flex gap-2 overflow-x-auto no-scrollbar hide-scrollbar pb-1">
+                                  {custBestTables.map((t) => {
+                                      const getBadgeColor = (type: MatchType) => {
+                                        switch (type) {
+                                          case 'perfect': return 'text-[#25D366] bg-[#25D366]/10 border-[#25D366]/30';
+                                          case 'ideal': return 'text-brand-accent bg-brand-accent/10 border-brand-accent/30';
+                                          case 'spacious': return 'text-blue-400 bg-blue-400/10 border-blue-400/30';
+                                          case 'tight': return 'text-amber-500 bg-amber-500/10 border-amber-500/30';
+                                          default: return 'text-brand-muted bg-white/5 border-white/10';
+                                        }
+                                      };
+                                      return (
+                                        <button 
+                                          title={`Map seat ${t.label}`}
+                                          onClick={() => {
+                                             setPendingSeatCustomer(customer);
+                                             setActiveTab('map');
+                                          }}
+                                          key={t.id} 
+                                          className={cn("shrink-0 rounded flex items-center gap-1.5 px-2 py-1 text-xs border hover:opacity-80 transition-opacity whitespace-nowrap", getBadgeColor(t.matchType))}
+                                        >
+                                          <span className="font-semibold font-cinzel">{t.label}</span>
+                                          <span className="opacity-70 text-[9px] uppercase tracking-wider">({t.matchType})</span>
+                                        </button>
+                                      );
+                                  })}
+                                </div>
+                              </div>
                             )}
-                          </h3>
-                          <div className="text-brand-muted text-sm flex flex-wrap items-center gap-x-4 gap-y-2 mt-1.5">
-                            <span className="font-mono text-xs bg-brand-bg px-2 py-0.5 rounded border border-brand-border">
-                              {maskPhone(customer.originalPhone)}
-                            </span>
-                            <span className="flex items-center gap-1.5">
-                              <Users size={14} className="text-brand-accent" /> 
-                              {customer.partySize} {customer.partySize === 1 ? 'person' : 'persons'}
-                            </span>
-                            <span className="flex items-center gap-1.5 text-brand-accent">
-                              <Clock size={14} /> 
-                              {getWaitTime(customer.addedAt)}
-                            </span>
                           </div>
                         </div>
-                      </div>
                       
-                      <div className="flex items-center justify-end gap-2 sm:gap-3 lg:w-auto w-full flex-wrap sm:flex-nowrap">
+                      <div className="flex sm:flex-col items-center sm:items-end justify-end gap-2 w-full sm:w-auto mt-2 sm:mt-0 flex-wrap sm:flex-nowrap border-t sm:border-t-0 p-2 sm:p-0 border-brand-border/30">
+                        <div className="flex items-center justify-end gap-2">
                         {backgroundQueue[customer.id]?.status === 'counting' ? (
                           <button 
                             disabled
@@ -756,15 +896,17 @@ export default function App() {
                             setPendingSeatCustomer(customer);
                             setActiveTab('map');
                           }}
-                          className="bg-white/5 border border-white/10 text-white px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium hover:bg-white/10 transition-colors flex-shrink-0"
+                          className={cn("bg-white/5 border border-white/10 text-white px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium hover:bg-white/10 transition-colors flex-shrink-0", isUrgent ? "border-red-500/20 hover:bg-red-500/20" : "")}
                           title="Seat on Floor Map"
                         >
                           <MapIcon size={16} /> MAP SEAT
                         </button>
+                        </div>
 
+                        <div className="flex w-full sm:w-auto items-center justify-end gap-2">
                         <button 
                           onClick={() => markSeated(customer.id)} 
-                          className="bg-brand-bg border border-brand-border text-brand-text px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium hover:border-brand-text transition-colors flex-shrink-0"
+                          className="flex-1 sm:flex-none justify-center bg-brand-bg border border-brand-border text-brand-text px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium hover:border-brand-text transition-colors flex-shrink-0"
                           title="Mark as Seated Manually"
                         >
                           SEAT (Quick)
@@ -772,14 +914,16 @@ export default function App() {
                         
                         <button 
                           onClick={() => deleteCustomer(customer.id)} 
-                          className="text-brand-muted hover:text-red-400 p-2.5 rounded-xl hover:bg-red-500/10 transition-colors ml-1 flex-shrink-0"
+                          className="text-brand-muted hover:text-red-400 p-2.5 rounded-xl hover:bg-red-500/10 transition-colors flex-shrink-0 bg-brand-bg/50 border border-brand-border"
                           title="Remove from list"
                         >
                           <Trash2 size={18} />
                         </button>
+                        </div>
+                      </div>
                       </div>
                     </div>
-                  ))}
+                  )})}
                 </div>
               )}
             </motion.div>
