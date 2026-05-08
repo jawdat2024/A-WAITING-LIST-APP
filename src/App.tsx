@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Clock, Users, MessageCircle, Check, Trash2, Plus, Minus, X, History as HistoryIcon, List, Loader2, CheckCircle2, Map as MapIcon, Maximize2, Minimize2, Lock, Sun, Moon } from 'lucide-react';
+import { Clock, Users, MessageCircle, Check, Trash2, Plus, Minus, X, History as HistoryIcon, List, Loader2, CheckCircle2, Map as MapIcon, Maximize2, Minimize2, Lock, Sun, Moon, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useFloorPlan } from './context/FloorPlanContext';
 import { useKioskAuth } from './components/AuthWrapper';
@@ -372,9 +372,7 @@ export default function App() {
     if (!customer.assignedTable) return;
 
     const templates = [
-      (name: string, count: number, table: string) => `Welcome back, *${name}*. Your table for *${count}* at *${table}* is all set and waiting for you at Cartel. Please head to the host stand when you arrive—we’ll take care of the rest. See you soon.\n\n*Cartel Coffee Roasters | The Art of Specialty.*`,
-      (name: string, count: number, table: string) => `Hi *${name}*, we’re ready to host you. We've reserved *${table}* for your party of *${count}*. Please check in with our hostess to be seated. We look forward to seeing you.\n\n*Cartel Coffee Roasters | The Art of Specialty.*`,
-      (name: string, count: number, table: string) => `Hello *${name}*, your wait is over. *${table}* is ready for your group of *${count}*. Please make your way to the entrance so we can get you settled.\n\n*Cartel Coffee Roasters | The Art of Specialty.*`
+      (name: string, count: number, table: string) => `Great news, *${name}*! Your table for *${count}* (*${table}*) is waiting for you. We’ll be holding your reservation for the next 10 minutes—just check in with the hostess when you arrive. We can’t wait to serve you!\n\n*Cartel Coffee Roasters | The Art of Specialty.*`
     ];
 
     const randomTemplate = templates[Math.floor(Math.random() * templates.length)];
@@ -387,7 +385,11 @@ export default function App() {
     window.open(whatsappUrl, '_blank');
 
     // Update status 
-    updateCustomer(customer.id, { status: 'NOTIFIED' });
+    updateCustomer(customer.id, { 
+      status: 'NOTIFIED',
+      notifiedAt: Date.now(),
+      gracePeriodEndsAt: Date.now() + 10 * 60 * 1000
+    });
     
     // Remove from queue
     setBackgroundQueue(prev => {
@@ -448,7 +450,20 @@ export default function App() {
     }
   };
 
-  const activeCustomers = customers.filter((c) => c.status !== 'SEATED');
+  const prioritySequence: Record<string, number> = { NOTIFIED: 1, REMINDED: 2, WAITING: 3, EXPIRED: 4, 'NO-SHOW': 5 };
+
+  const activeCustomers = customers
+    .filter((c) => c.status !== 'SEATED')
+    .sort((a, b) => {
+      // Primary sort: Oldest first (lowest timestamp at top)
+      if (a.addedAt !== b.addedAt) {
+        return a.addedAt - b.addedAt;
+      }
+      // Secondary sort: Priority
+      const priorityA = prioritySequence[a.status] || 99;
+      const priorityB = prioritySequence[b.status] || 99;
+      return priorityA - priorityB;
+    });
   const seatedCustomers = customers.filter((c) => c.status === 'SEATED');
   const isSystemDirty = customers.length > 0 || tables.some(t => t.status !== 'available');
   
@@ -812,6 +827,16 @@ export default function App() {
                                 <Clock size={14} /> 
                                 {getWaitTime(customer.addedAt)}
                               </span>
+                              {customer.status === 'NOTIFIED' && customer.gracePeriodEndsAt && (
+                                <span className={cn("flex items-center gap-1.5 font-bold", 
+                                  now > customer.gracePeriodEndsAt ? "text-red-500" : "text-amber-500"
+                                )}>
+                                  <AlertCircle size={14} />
+                                  {now > customer.gracePeriodEndsAt 
+                                    ? "Expired" 
+                                    : `Hold: ${Math.max(0, Math.ceil((customer.gracePeriodEndsAt - now) / 60000))}m`}
+                                </span>
+                              )}
                             </div>
 
                             {/* Smart Auto-Suggest inside Waitlist item */}
